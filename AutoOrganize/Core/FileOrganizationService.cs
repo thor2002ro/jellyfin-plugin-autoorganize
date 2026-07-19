@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Concurrent;
-using System.Diagnostics.CodeAnalysis;
+using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AutoOrganize.Data;
@@ -16,302 +17,231 @@ using MediaBrowser.Model.Querying;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
 
-namespace AutoOrganize.Core
+namespace AutoOrganize.Core;
+
+public class FileOrganizationService : IFileOrganizationService
 {
-    /// <inheritdoc/>
-    public class FileOrganizationService : IFileOrganizationService
-    {
-        private readonly ITaskManager _taskManager;
-        private readonly IFileOrganizationRepository _repo;
-        private readonly ILoggerFactory _loggerFactory;
-        private readonly ILogger<FileOrganizationService> _logger;
-        private readonly ILibraryMonitor _libraryMonitor;
-        private readonly ILibraryManager _libraryManager;
-        private readonly IServerConfigurationManager _config;
-        private readonly IFileSystem _fileSystem;
-        private readonly IProviderManager _providerManager;
-        private readonly ConcurrentDictionary<string, bool> _inProgressItemIds = new ConcurrentDictionary<string, bool>();
-        private readonly NamingOptions _namingOptions;
+	private readonly ITaskManager _taskManager;
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="FileOrganizationService"/> class.
-        /// </summary>
-        [SuppressMessage("StyleCop.CSharp.DocumentationRules", "SA1611:Element parameters should be documented", Justification = "Parameter names/types are self-documenting.")]
-        public FileOrganizationService(
-            ITaskManager taskManager,
-            IFileOrganizationRepository repo,
-            ILoggerFactory loggerFactory,
-            ILibraryMonitor libraryMonitor,
-            ILibraryManager libraryManager,
-            IServerConfigurationManager config,
-            IFileSystem fileSystem,
-            IProviderManager providerManager)
-        {
-            _taskManager = taskManager;
-            _repo = repo;
-            _loggerFactory = loggerFactory;
-            _logger = loggerFactory.CreateLogger<FileOrganizationService>();
-            _libraryMonitor = libraryMonitor;
-            _libraryManager = libraryManager;
-            _config = config;
-            _fileSystem = fileSystem;
-            _providerManager = providerManager;
-            _namingOptions = new NamingOptions();
-        }
+	private readonly IFileOrganizationRepository _repo;
 
-        /// <inheritdoc/>
-        public void BeginProcessNewFiles()
-        {
-            _taskManager.CancelIfRunningAndQueue<OrganizerScheduledTask>();
-        }
+	private readonly ILoggerFactory _loggerFactory;
 
-        /// <inheritdoc/>
-        public void SaveResult(FileOrganizationResult result, CancellationToken cancellationToken)
-        {
-            if (result == null || string.IsNullOrEmpty(result.OriginalPath))
-            {
-                throw new ArgumentNullException(nameof(result));
-            }
+	private readonly ILogger<FileOrganizationService> _logger;
 
-            result.Id = result.OriginalPath.GetMD5().ToString("N", CultureInfo.InvariantCulture);
+	private readonly ILibraryMonitor _libraryMonitor;
 
-            _repo.SaveResult(result, cancellationToken);
-        }
+	private readonly ILibraryManager _libraryManager;
 
-        /// <inheritdoc/>
-        public void SaveResult(SmartMatchResult result, CancellationToken cancellationToken)
-        {
-            if (result == null)
-            {
-                throw new ArgumentNullException(nameof(result));
-            }
+	private readonly IServerConfigurationManager _config;
 
-            _repo.SaveResult(result, cancellationToken);
-        }
+	private readonly IFileSystem _fileSystem;
 
-        /// <inheritdoc/>
-        public QueryResult<FileOrganizationResult> GetResults(FileOrganizationResultQuery query)
-        {
-            var results = _repo.GetResults(query);
+	private readonly IProviderManager _providerManager;
 
-            foreach (var result in results.Items)
-            {
-                result.IsInProgress = _inProgressItemIds.ContainsKey(result.Id);
-            }
+	private readonly ConcurrentDictionary<string, bool> _inProgressItemIds = new ConcurrentDictionary<string, bool>();
 
-            return results;
-        }
+	private readonly NamingOptions _namingOptions;
 
-        /// <inheritdoc/>
-        public FileOrganizationResult GetResult(string id)
-        {
-            var result = _repo.GetResult(id);
+	public FileOrganizationService(ITaskManager taskManager, IFileOrganizationRepository repo, ILoggerFactory loggerFactory, ILibraryMonitor libraryMonitor, ILibraryManager libraryManager, IServerConfigurationManager config, IFileSystem fileSystem, IProviderManager providerManager)
+	{
+		_taskManager = taskManager;
+		_repo = repo;
+		_loggerFactory = loggerFactory;
+		_logger = loggerFactory.CreateLogger<FileOrganizationService>();
+		_libraryMonitor = libraryMonitor;
+		_libraryManager = libraryManager;
+		_config = config;
+		_fileSystem = fileSystem;
+		_providerManager = providerManager;
+		_namingOptions = new NamingOptions();
+	}
 
-            if (result != null)
-            {
-                result.IsInProgress = _inProgressItemIds.ContainsKey(result.Id);
-            }
+	public void BeginProcessNewFiles()
+	{
+		_taskManager.CancelIfRunningAndQueue<OrganizerScheduledTask>();
+	}
 
-            return result;
-        }
+	public void SaveResult(FileOrganizationResult result, CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(result, "result");
+		ArgumentException.ThrowIfNullOrWhiteSpace(result.OriginalPath, "result.OriginalPath");
+		result.Id = result.OriginalPath.GetMD5().ToString("N", CultureInfo.InvariantCulture);
+		_repo.SaveResult(result, cancellationToken);
+	}
 
-        /// <inheritdoc/>
-        public FileOrganizationResult GetResultBySourcePath(string path)
-        {
-            if (string.IsNullOrEmpty(path))
-            {
-                throw new ArgumentNullException(nameof(path));
-            }
+	public void SaveResult(SmartMatchResult result, CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(result, "result");
+		_repo.SaveResult(result, cancellationToken);
+	}
 
-            var id = path.GetMD5().ToString("N", CultureInfo.InvariantCulture);
+	public QueryResult<FileOrganizationResult> GetResults(FileOrganizationResultQuery query)
+	{
+		ArgumentNullException.ThrowIfNull(query, "query");
+		QueryResult<FileOrganizationResult> results = _repo.GetResults(query);
+		foreach (FileOrganizationResult item in results.Items)
+		{
+			item.IsInProgress = _inProgressItemIds.ContainsKey(item.Id);
+		}
+		return results;
+	}
 
-            return GetResult(id);
-        }
+	public FileOrganizationResult? GetResult(string id)
+	{
+		if (!Guid.TryParse(id, out var _))
+		{
+			return null;
+		}
+		FileOrganizationResult? result2 = _repo.GetResult(id);
+		if (result2 != null)
+		{
+			result2.IsInProgress = _inProgressItemIds.ContainsKey(result2.Id);
+		}
+		return result2;
+	}
 
-        /// <inheritdoc/>
-        public async Task DeleteOriginalFile(string resultId)
-        {
-            var result = _repo.GetResult(resultId);
+	public FileOrganizationResult? GetResultBySourcePath(string path)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(path, "path");
+		string id = path.GetMD5().ToString("N", CultureInfo.InvariantCulture);
+		return GetResult(id);
+	}
 
-            _logger.LogInformation("Requested to delete {0}", result.OriginalPath);
+	public async Task DeleteOriginalFile(string resultId, CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		FileOrganizationResult result = _repo.GetResult(resultId) ?? throw new OrganizationException("Organization result '" + resultId + "' was not found.");
+		EnsureSourcePathIsAuthorized(result.OriginalPath);
+		_logger.LogInformation("Requested to delete {OriginalPath}", result.OriginalPath);
+		if (!AddToInProgressList(result, fullClientRefresh: false))
+		{
+			throw new OrganizationException("Path is currently processed otherwise. Please try again later.");
+		}
+		try
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (_fileSystem.FileExists(result.OriginalPath))
+			{
+				_fileSystem.DeleteFile(result.OriginalPath);
+			}
+			await _repo.Delete(resultId, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+		}
+		finally
+		{
+			RemoveFromInprogressList(result);
+		}
+	}
 
-            if (!AddToInProgressList(result, false))
-            {
-                throw new OrganizationException("Path is currently processed otherwise. Please try again later.");
-            }
+	public async Task PerformOrganization(string resultId, CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		FileOrganizationResult fileOrganizationResult = _repo.GetResult(resultId) ?? throw new OrganizationException("Organization result '" + resultId + "' was not found.");
+		EnsureSourcePathIsAuthorized(fileOrganizationResult.OriginalPath);
+		AutoOrganizeOptions autoOrganizeOptions = _config.GetAutoOrganizeOptions();
+		FileOrganizationResult fileOrganizationResult2 = fileOrganizationResult.Type switch
+		{
+			FileOrganizerType.Episode => await new EpisodeFileOrganizer(this, _fileSystem, _loggerFactory.CreateLogger<EpisodeFileOrganizer>(), _libraryManager, _libraryMonitor, _providerManager, _namingOptions).OrganizeEpisodeFile(fileOrganizationResult.OriginalPath, autoOrganizeOptions.TvOptions, cancellationToken).ConfigureAwait(continueOnCapturedContext: false), 
+			FileOrganizerType.Movie => await new MovieFileOrganizer(this, _fileSystem, _loggerFactory.CreateLogger<MovieFileOrganizer>(), _libraryManager, _libraryMonitor, _providerManager, _namingOptions).OrganizeMovieFile(fileOrganizationResult.OriginalPath, autoOrganizeOptions.MovieOptions, autoOrganizeOptions.MovieOptions.OverwriteExistingFiles, cancellationToken).ConfigureAwait(continueOnCapturedContext: false), 
+			_ => throw new OrganizationException("No organizer exist for the type " + fileOrganizationResult.Type), 
+		};
+		if (fileOrganizationResult2.Status != FileSortingStatus.Success)
+		{
+			throw new OrganizationException(fileOrganizationResult2.StatusMessage ?? "The media file could not be organized.");
+		}
+	}
 
-            try
-            {
-                _fileSystem.DeleteFile(result.OriginalPath);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error deleting {0}", result.OriginalPath);
-            }
-            finally
-            {
-                RemoveFromInprogressList(result);
-            }
+	public async Task ClearLog(CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		await _repo.DeleteAll(cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+	}
 
-            await _repo.Delete(resultId).ConfigureAwait(false);
-        }
+	public async Task ClearCompleted(CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		await _repo.DeleteCompleted(cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+	}
 
-        /// <inheritdoc/>
-        public async Task PerformOrganization(string resultId)
-        {
-            var result = _repo.GetResult(resultId);
+	public async Task PerformOrganization(EpisodeFileOrganizationRequest request, CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(request, "request");
+		EpisodeFileOrganizer episodeFileOrganizer = new EpisodeFileOrganizer(this, _fileSystem, _loggerFactory.CreateLogger<EpisodeFileOrganizer>(), _libraryManager, _libraryMonitor, _providerManager, _namingOptions);
+		AutoOrganizeOptions autoOrganizeOptions = _config.GetAutoOrganizeOptions();
+		FileOrganizationResult fileOrganizationResult = await episodeFileOrganizer.OrganizeWithCorrection(request, autoOrganizeOptions.TvOptions, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+		if (fileOrganizationResult.Status != FileSortingStatus.Success)
+		{
+			throw new OrganizationException(fileOrganizationResult.StatusMessage ?? "The episode file could not be organized.");
+		}
+	}
 
-            var options = _config.GetAutoOrganizeOptions();
+	public async Task PerformOrganization(MovieFileOrganizationRequest request, CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(request, "request");
+		MovieFileOrganizer movieFileOrganizer = new MovieFileOrganizer(this, _fileSystem, _loggerFactory.CreateLogger<MovieFileOrganizer>(), _libraryManager, _libraryMonitor, _providerManager, _namingOptions);
+		AutoOrganizeOptions autoOrganizeOptions = _config.GetAutoOrganizeOptions();
+		FileOrganizationResult fileOrganizationResult = await movieFileOrganizer.OrganizeWithCorrection(request, autoOrganizeOptions.MovieOptions, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+		if (fileOrganizationResult.Status != FileSortingStatus.Success)
+		{
+			throw new OrganizationException(fileOrganizationResult.StatusMessage ?? "The movie file could not be organized.");
+		}
+	}
 
-            if (string.IsNullOrEmpty(result.TargetPath))
-            {
-                throw new ArgumentException("No target path available.");
-            }
+	public QueryResult<SmartMatchResult> GetSmartMatchInfos(FileOrganizationResultQuery query)
+	{
+		return _repo.GetSmartMatch(query);
+	}
 
-            FileOrganizationResult organizeResult;
-            switch (result.Type)
-            {
-                case FileOrganizerType.Episode:
-                    var episodeOrganizer = new EpisodeFileOrganizer(
-                        this,
-                        _fileSystem,
-                        _loggerFactory.CreateLogger<EpisodeFileOrganizer>(),
-                        _libraryManager,
-                        _libraryMonitor,
-                        _providerManager,
-                        _namingOptions);
-                    organizeResult = await episodeOrganizer.OrganizeEpisodeFile(result.OriginalPath, options.TvOptions, CancellationToken.None)
-                        .ConfigureAwait(false);
-                    break;
-                case FileOrganizerType.Movie:
-                    var movieOrganizer = new MovieFileOrganizer(
-                        this,
-                        _fileSystem,
-                        _loggerFactory.CreateLogger<MovieFileOrganizer>(),
-                        _libraryManager,
-                        _libraryMonitor,
-                        _providerManager,
-                        _namingOptions);
-                    organizeResult = await movieOrganizer.OrganizeMovieFile(result.OriginalPath, options.MovieOptions, true, CancellationToken.None)
-                        .ConfigureAwait(false);
-                    break;
-                default:
-                    throw new OrganizationException("No organizer exist for the type " + result.Type);
-            }
+	public QueryResult<SmartMatchResult> GetSmartMatchInfos()
+	{
+		return _repo.GetSmartMatch(new FileOrganizationResultQuery());
+	}
 
-            if (organizeResult.Status != FileSortingStatus.Success)
-            {
-                throw new OrganizationException(result.StatusMessage);
-            }
-        }
+	public async Task DeleteSmartMatchEntry(string id, string matchString, CancellationToken cancellationToken)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(id, "id");
+		ArgumentException.ThrowIfNullOrWhiteSpace(matchString, "matchString");
+		cancellationToken.ThrowIfCancellationRequested();
+		await _repo.DeleteSmartMatch(id, matchString, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+	}
 
-        /// <inheritdoc/>
-        public async Task ClearLog()
-        {
-            await _repo.DeleteAll().ConfigureAwait(false);
-        }
+	public bool AddToInProgressList(FileOrganizationResult result, bool fullClientRefresh)
+	{
+		ArgumentNullException.ThrowIfNull(result, "result");
+		ArgumentException.ThrowIfNullOrWhiteSpace(result.OriginalPath, "result.OriginalPath");
+		if (string.IsNullOrWhiteSpace(result.Id))
+		{
+			result.Id = result.OriginalPath.GetMD5().ToString("N", CultureInfo.InvariantCulture);
+		}
+		if (!_inProgressItemIds.TryAdd(result.Id, value: false))
+		{
+			return false;
+		}
+		result.IsInProgress = true;
+		return true;
+	}
 
-        /// <inheritdoc/>
-        public async Task ClearCompleted()
-        {
-            await _repo.DeleteCompleted().ConfigureAwait(false);
-        }
+	public bool RemoveFromInprogressList(FileOrganizationResult result)
+	{
+		ArgumentNullException.ThrowIfNull(result, "result");
+		bool value;
+		bool result2 = !string.IsNullOrEmpty(result.Id) && _inProgressItemIds.TryRemove(result.Id, out value);
+		result.IsInProgress = false;
+		return result2;
+	}
 
-        /// <inheritdoc/>
-        public async Task PerformOrganization(EpisodeFileOrganizationRequest request)
-        {
-            var organizer = new EpisodeFileOrganizer(
-                this,
-                _fileSystem,
-                _loggerFactory.CreateLogger<EpisodeFileOrganizer>(),
-                _libraryManager,
-                _libraryMonitor,
-                _providerManager,
-                _namingOptions);
-
-            var options = _config.GetAutoOrganizeOptions();
-            var result = await organizer.OrganizeWithCorrection(request, options.TvOptions, CancellationToken.None).ConfigureAwait(false);
-
-            if (result.Status != FileSortingStatus.Success)
-            {
-                throw new Exception(result.StatusMessage);
-            }
-        }
-
-        /// <inheritdoc/>
-        public async Task PerformOrganization(MovieFileOrganizationRequest request)
-        {
-            var organizer = new MovieFileOrganizer(
-                this,
-                _fileSystem,
-                _loggerFactory.CreateLogger<MovieFileOrganizer>(),
-                _libraryManager,
-                _libraryMonitor,
-                _providerManager,
-                _namingOptions);
-
-            var options = _config.GetAutoOrganizeOptions();
-            var result = await organizer.OrganizeWithCorrection(request, options.MovieOptions, CancellationToken.None).ConfigureAwait(false);
-
-            if (result.Status != FileSortingStatus.Success)
-            {
-                throw new Exception(result.StatusMessage);
-            }
-        }
-
-        /// <inheritdoc/>
-        public QueryResult<SmartMatchResult> GetSmartMatchInfos(FileOrganizationResultQuery query)
-        {
-            return _repo.GetSmartMatch(query);
-        }
-
-        /// <inheritdoc/>
-        public QueryResult<SmartMatchResult> GetSmartMatchInfos()
-        {
-            return _repo.GetSmartMatch(new FileOrganizationResultQuery());
-        }
-
-        /// <inheritdoc/>
-        public void DeleteSmartMatchEntry(string id, string matchString)
-        {
-            if (string.IsNullOrEmpty(id))
-            {
-                throw new ArgumentNullException(nameof(id));
-            }
-
-            if (string.IsNullOrEmpty(matchString))
-            {
-                throw new ArgumentNullException(nameof(matchString));
-            }
-
-            _repo.DeleteSmartMatch(id, matchString);
-        }
-
-        /// <inheritdoc/>
-        public bool AddToInProgressList(FileOrganizationResult result, bool fullClientRefresh)
-        {
-            if (string.IsNullOrWhiteSpace(result.Id))
-            {
-                result.Id = result.OriginalPath.GetMD5().ToString("N", CultureInfo.InvariantCulture);
-            }
-
-            if (!_inProgressItemIds.TryAdd(result.Id, false))
-            {
-                return false;
-            }
-
-            result.IsInProgress = true;
-            return true;
-        }
-
-        /// <inheritdoc/>
-        public bool RemoveFromInprogressList(FileOrganizationResult result)
-        {
-            bool itemValue;
-            var retval = _inProgressItemIds.TryRemove(result.Id, out itemValue);
-
-            result.IsInProgress = false;
-            return retval;
-        }
-    }
+	private void EnsureSourcePathIsAuthorized(string sourcePath)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath, "sourcePath");
+		AutoOrganizeOptions autoOrganizeOptions = _config.GetAutoOrganizeOptions();
+		List<string> list = new List<string>();
+		IEnumerable<string>? enumerable = autoOrganizeOptions.TvOptions?.WatchLocations;
+		list.AddRange(enumerable ?? Enumerable.Empty<string>());
+		enumerable = autoOrganizeOptions.MovieOptions?.WatchLocations;
+		list.AddRange(enumerable ?? Enumerable.Empty<string>());
+		if (!PathSafety.IsSafelyWithinAnyRoot(sourcePath, list))
+		{
+			throw new OrganizationException("Source path '" + sourcePath + "' is outside the configured Auto Organize watch folders or traverses a symbolic link.");
+		}
+	}
 }

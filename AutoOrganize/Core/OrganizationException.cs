@@ -1,25 +1,20 @@
 using System;
 
-namespace AutoOrganize.Core
-{
-    /// <summary>
-    /// An generic exception that occurs during file organization.
-    /// </summary>
-    public class OrganizationException : Exception
-    {
-        /// <summary>
-        /// Initializes a new instance of the <see cref="OrganizationException"/> class.
-        /// </summary>
-        public OrganizationException()
-        {
-        }
+namespace AutoOrganize.Core;
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="OrganizationException"/> class with a specified error message.
-        /// </summary>
-        /// <param name="msg">The message that describes the error.</param>
-        public OrganizationException(string msg) : base(msg)
-        {
-        }
-    }
+public class OrganizationException : Exception
+{
+	public OrganizationException()
+	{
+	}
+
+	public OrganizationException(string msg)
+		: base(msg)
+	{
+	}
+
+	public OrganizationException(string message, Exception innerException)
+		: base(message, innerException)
+	{
+	}
 }

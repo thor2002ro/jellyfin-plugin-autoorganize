@@ -1,28 +1,9 @@
-namespace AutoOrganize.Model
+namespace AutoOrganize.Model;
+
+public enum FileOrganizerType
 {
-    /// <summary>
-    /// Contains the supported file organization types.
-    /// </summary>
-    public enum FileOrganizerType
-    {
-        /// <summary>
-        /// Unknown.
-        /// </summary>
-        Unknown,
-
-        /// <summary>
-        /// Movie.
-        /// </summary>
-        Movie,
-
-        /// <summary>
-        /// TV Episode.
-        /// </summary>
-        Episode,
-
-        /// <summary>
-        /// Song.
-        /// </summary>
-        Song
-    }
+	Unknown,
+	Movie,
+	Episode,
+	Song
 }

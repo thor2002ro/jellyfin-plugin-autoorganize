@@ -1,11 +1,7 @@
 using MediaBrowser.Model.Plugins;
 
-namespace AutoOrganize.Configuration
+namespace AutoOrganize.Configuration;
+
+public class PluginConfiguration : BasePluginConfiguration
 {
-    /// <summary>
-    /// Configuration for <see cref="AutoOrganize.AutoOrganizePlugin"/>.
-    /// </summary>
-    public class PluginConfiguration : BasePluginConfiguration
-    {
-    }
 }

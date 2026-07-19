@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
+using AutoOrganize.Model;
 using Emby.Naming.Common;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Library;
@@ -11,122 +11,142 @@ using MediaBrowser.Model.IO;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
 
-namespace AutoOrganize.Core
+namespace AutoOrganize.Core;
+
+public class OrganizerScheduledTask : IScheduledTask, IConfigurableScheduledTask
 {
-    /// <summary>
-    /// A scheduled task that organizes media files.
-    /// </summary>
-    public class OrganizerScheduledTask : IScheduledTask, IConfigurableScheduledTask
-    {
-        private readonly ILibraryMonitor _libraryMonitor;
-        private readonly ILibraryManager _libraryManager;
-        private readonly ILoggerFactory _loggerFactory;
-        private readonly ILogger<OrganizerScheduledTask> _logger;
-        private readonly IFileSystem _fileSystem;
-        private readonly IServerConfigurationManager _config;
-        private readonly IProviderManager _providerManager;
-        private readonly NamingOptions _namingOptions;
+	private sealed class MappedProgress : IProgress<double>
+	{
+		private readonly IProgress<double> _inner;
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="OrganizerScheduledTask"/> class.
-        /// </summary>
-        [SuppressMessage("StyleCop.CSharp.DocumentationRules", "SA1611:Element parameters should be documented", Justification = "Parameter types/names are self-documenting")]
-        public OrganizerScheduledTask(
-            ILibraryMonitor libraryMonitor,
-            ILibraryManager libraryManager,
-            ILoggerFactory loggerFactory,
-            IFileSystem fileSystem,
-            IServerConfigurationManager config,
-            IProviderManager providerManager)
-        {
-            _libraryMonitor = libraryMonitor;
-            _libraryManager = libraryManager;
-            _loggerFactory = loggerFactory;
-            _logger = loggerFactory.CreateLogger<OrganizerScheduledTask>();
-            _fileSystem = fileSystem;
-            _config = config;
-            _providerManager = providerManager;
-            _namingOptions = new NamingOptions();
-        }
+		private readonly double _start;
 
-        /// <inheritdoc/>
-        public string Key => "AutoOrganize";
+		private readonly double _range;
 
-        /// <inheritdoc/>
-        public string Name => "Organize new media files";
+		public MappedProgress(IProgress<double> inner, double start, double end)
+		{
+			_inner = inner;
+			_start = start;
+			_range = end - start;
+		}
 
-        /// <inheritdoc/>
-        public string Description => "Processes new files available in the configured watch folder.";
+		public void Report(double value)
+		{
+			_inner.Report(_start + Math.Clamp(value, 0.0, 100.0) / 100.0 * _range);
+		}
+	}
 
-        /// <inheritdoc/>
-        public string Category => "Library";
+	private readonly ILibraryMonitor _libraryMonitor;
 
-        /// <inheritdoc/>
-        public bool IsHidden =>
-            !_config.GetAutoOrganizeOptions().TvOptions.IsEnabled
-            && !_config.GetAutoOrganizeOptions().MovieOptions.IsEnabled;
+	private readonly ILibraryManager _libraryManager;
 
-        /// <inheritdoc/>
-        public bool IsEnabled =>
-            _config.GetAutoOrganizeOptions().TvOptions.IsEnabled
-            || _config.GetAutoOrganizeOptions().MovieOptions.IsEnabled;
+	private readonly ILoggerFactory _loggerFactory;
 
-        /// <inheritdoc/>
-        public bool IsLogged => false;
+	private readonly ILogger<OrganizerScheduledTask> _logger;
 
-        /// <inheritdoc/>
-        public async Task Execute(CancellationToken cancellationToken, IProgress<double> progress)
-        {
-            bool queueTv = false, queueMovie = false;
+	private readonly IFileSystem _fileSystem;
 
-            var options = _config.GetAutoOrganizeOptions();
+	private readonly IServerConfigurationManager _config;
 
-            if (options.TvOptions.IsEnabled)
-            {
-                queueTv = options.TvOptions.QueueLibraryScan;
-                var fileOrganizationService = PluginEntryPoint.Current.FileOrganizationService;
+	private readonly IProviderManager _providerManager;
 
-                await new TvFolderOrganizer(
-                    _libraryManager,
-                    _loggerFactory,
-                    _fileSystem,
-                    _libraryMonitor,
-                    fileOrganizationService,
-                    _providerManager,
-                    _namingOptions)
-                    .Organize(options.TvOptions, progress, cancellationToken).ConfigureAwait(false);
-            }
+	private readonly NamingOptions _namingOptions;
 
-            if (options.MovieOptions.IsEnabled)
-            {
-                queueMovie = options.MovieOptions.QueueLibraryScan;
-                var fileOrganizationService = PluginEntryPoint.Current.FileOrganizationService;
+	private readonly IFileOrganizationService _fileOrganizationService;
 
-                await new MovieFolderOrganizer(
-                        _libraryManager,
-                        _loggerFactory,
-                        _fileSystem,
-                        _libraryMonitor,
-                        fileOrganizationService,
-                        _providerManager,
-                        _namingOptions)
-                    .Organize(options.MovieOptions, progress, cancellationToken).ConfigureAwait(false);
-            }
+	public string Key => "AutoOrganize";
 
-            if ((queueTv || queueMovie) && !_libraryManager.IsScanRunning)
-            {
-                _libraryManager.QueueLibraryScan();
-            }
-        }
+	public string Name => "Organize new media files";
 
-        /// <inheritdoc/>
-        public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
-        {
-            return new[]
-            {
-                // Every so often
-                new TaskTriggerInfo { Type = TaskTriggerInfo.TriggerInterval, IntervalTicks = TimeSpan.FromMinutes(5).Ticks }
-            };
-        }
-    }
+	public string Description => "Processes new files available in the configured watch folder.";
+
+	public string Category => "Library";
+
+	public bool IsHidden => !IsEnabled;
+
+	public bool IsEnabled
+	{
+		get
+		{
+			AutoOrganizeOptions autoOrganizeOptions = _config.GetAutoOrganizeOptions();
+			if (!autoOrganizeOptions.TvOptions.IsEnabled)
+			{
+				return autoOrganizeOptions.MovieOptions.IsEnabled;
+			}
+			return true;
+		}
+	}
+
+	public bool IsLogged => false;
+
+	public OrganizerScheduledTask(ILibraryMonitor libraryMonitor, ILibraryManager libraryManager, ILoggerFactory loggerFactory, IFileSystem fileSystem, IServerConfigurationManager config, IProviderManager providerManager, IFileOrganizationService fileOrganizationService)
+	{
+		_libraryMonitor = libraryMonitor;
+		_libraryManager = libraryManager;
+		_loggerFactory = loggerFactory;
+		_logger = loggerFactory.CreateLogger<OrganizerScheduledTask>();
+		_fileSystem = fileSystem;
+		_config = config;
+		_providerManager = providerManager;
+		_fileOrganizationService = fileOrganizationService;
+		_namingOptions = new NamingOptions();
+	}
+
+	public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
+	{
+		bool queueTv = false;
+		bool queueMovie = false;
+		AutoOrganizeOptions options = _config.GetAutoOrganizeOptions();
+		bool isEnabled = options.TvOptions.IsEnabled;
+		bool organizeMovies = options.MovieOptions.IsEnabled;
+		IProgress<double> progress2;
+		if (!(isEnabled && organizeMovies))
+		{
+			progress2 = progress;
+		}
+		else
+		{
+			IProgress<double> progress3 = new MappedProgress(progress, 0.0, 50.0);
+			progress2 = progress3;
+		}
+		IProgress<double> progress4 = progress2;
+		IProgress<double> progress5;
+		if (!(isEnabled && organizeMovies))
+		{
+			progress5 = progress;
+		}
+		else
+		{
+			IProgress<double> progress3 = new MappedProgress(progress, 50.0, 100.0);
+			progress5 = progress3;
+		}
+		IProgress<double> movieProgress = progress5;
+		if (isEnabled)
+		{
+			queueTv = options.TvOptions.QueueLibraryScan;
+			await new TvFolderOrganizer(_libraryManager, _loggerFactory, _fileSystem, _libraryMonitor, _fileOrganizationService, _providerManager, _namingOptions).Organize(options.TvOptions, progress4, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+		}
+		if (organizeMovies)
+		{
+			queueMovie = options.MovieOptions.QueueLibraryScan;
+			await new MovieFolderOrganizer(_libraryManager, _loggerFactory, _fileSystem, _libraryMonitor, _fileOrganizationService, _providerManager, _namingOptions).Organize(options.MovieOptions, movieProgress, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+		}
+		progress.Report(100.0);
+		if ((queueTv || queueMovie) && !_libraryManager.IsScanRunning)
+		{
+			_libraryManager.QueueLibraryScan();
+		}
+	}
+
+	public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
+	{
+		return new TaskTriggerInfo[1]
+		{
+			new TaskTriggerInfo
+			{
+				Type = TaskTriggerInfoType.IntervalTrigger,
+				IntervalTicks = TimeSpan.FromMinutes(5L).Ticks
+			}
+		};
+	}
 }

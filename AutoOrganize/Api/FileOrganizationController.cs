@@ -1,239 +1,239 @@
-using System.Collections.Generic;
-using System.Net.Mime;
+using System.Threading;
 using System.Threading.Tasks;
 using AutoOrganize.Core;
 using AutoOrganize.Model;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Querying;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
-namespace AutoOrganize.Api
+namespace AutoOrganize.Api;
+
+[ApiController]
+[Authorize(Policy = "RequiresElevation")]
+[Route("Library/FileOrganizations")]
+[Produces("application/json", new string[] { })]
+public class FileOrganizationController : ControllerBase
 {
-    /// <summary>
-    /// The file organization controller.
-    /// </summary>
-    [ApiController]
-    [Authorize(Policy = "RequiresElevation")]
-    [Route("Library/FileOrganizations")]
-    [Produces(MediaTypeNames.Application.Json)]
-    public class FileOrganizationController : ControllerBase
-    {
-        private static IFileOrganizationService InternalFileOrganizationService
-            => PluginEntryPoint.Current.FileOrganizationService;
+	private readonly IFileOrganizationService _fileOrganizationService;
 
-        /// <summary>
-        /// Gets file organization results.
-        /// </summary>
-        /// <param name="startIndex">Optional. The record index to start at. All items with a lower index will be dropped from the results.</param>
-        /// <param name="limit">Optional. The maximum number of records to return.</param>
-        /// <response code="204">Organization result returned.</response>
-        /// <returns>A <see cref="QueryResult{FileOrganizationResult}"/>.</returns>
-        [HttpGet]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public ActionResult<QueryResult<FileOrganizationResult>> Get(int? startIndex, int? limit)
-        {
-            var result = InternalFileOrganizationService.GetResults(new FileOrganizationResultQuery
-            {
-                Limit = limit,
-                StartIndex = startIndex
-            });
+	public FileOrganizationController(IFileOrganizationService fileOrganizationService)
+	{
+		_fileOrganizationService = fileOrganizationService;
+	}
 
-            return result;
-        }
+	[HttpGet]
+	[ProducesResponseType(200)]
+	public ActionResult<QueryResult<FileOrganizationResult>> Get([FromQuery] int? startIndex, [FromQuery] int? limit)
+	{
+		if (!TryCreateQuery(startIndex, limit, out FileOrganizationResultQuery query, out string error))
+		{
+			return BadRequest(error);
+		}
+		return _fileOrganizationService.GetResults(query);
+	}
 
-        /// <summary>
-        /// Deletes the original file of a organizer result.
-        /// </summary>
-        /// <param name="id">The result id.</param>
-        /// <response code="204">Original file deleted.</response>
-        /// <returns>A <see cref="NoContentResult"/> indicating success.</returns>
-        [HttpDelete("{id}/File")]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
-        public async Task<ActionResult> Delete([FromRoute] string id)
-        {
-            await InternalFileOrganizationService.DeleteOriginalFile(id)
-                .ConfigureAwait(false);
+	[HttpDelete("{id}/File")]
+	[ProducesResponseType(204)]
+	[ProducesResponseType(404)]
+	public async Task<ActionResult> Delete([FromRoute] string id, CancellationToken cancellationToken)
+	{
+		if (_fileOrganizationService.GetResult(id) == null)
+		{
+			return NotFound();
+		}
+		try
+		{
+			await _fileOrganizationService.DeleteOriginalFile(id, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+			return NoContent();
+		}
+		catch (OrganizationException exception)
+		{
+			return OrganizationProblem(exception);
+		}
+	}
 
-            return NoContent();
-        }
+	[HttpDelete]
+	[ProducesResponseType(204)]
+	public async Task<ActionResult> ClearActivityLog(CancellationToken cancellationToken)
+	{
+		await _fileOrganizationService.ClearLog(cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+		return NoContent();
+	}
 
-        /// <summary>
-        /// Clears the activity log.
-        /// </summary>
-        /// <response code="204">Activity log cleared.</response>
-        /// <returns>A <see cref="NoContentResult"/> indicating success.</returns>
-        [HttpDelete]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
-        public async Task<ActionResult> ClearActivityLog()
-        {
-            await InternalFileOrganizationService.ClearLog()
-                .ConfigureAwait(false);
+	[HttpDelete("Completed")]
+	[ProducesResponseType(204)]
+	public async Task<ActionResult> ClearCompletedActivityLog(CancellationToken cancellationToken)
+	{
+		await _fileOrganizationService.ClearCompleted(cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+		return NoContent();
+	}
 
-            return NoContent();
-        }
+	[HttpPost("{id}/Organize")]
+	[ProducesResponseType(204)]
+	[ProducesResponseType(404)]
+	public async Task<ActionResult> PerformOrganization([FromRoute] string id, CancellationToken cancellationToken)
+	{
+		if (_fileOrganizationService.GetResult(id) == null)
+		{
+			return NotFound();
+		}
+		try
+		{
+			await _fileOrganizationService.PerformOrganization(id, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+			return NoContent();
+		}
+		catch (OrganizationException exception)
+		{
+			return OrganizationProblem(exception);
+		}
+	}
 
-        /// <summary>
-        /// Clears the activity log.
-        /// </summary>
-        /// <returns>A <see cref="NoContentResult"/> indicating success.</returns>
-        [HttpDelete("Completed")]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
-        public async Task<ActionResult> ClearCompletedActivityLog()
-        {
-            await InternalFileOrganizationService.ClearCompleted()
-                .ConfigureAwait(false);
+	[HttpPost("{id}/Episode/Organize")]
+	[ProducesResponseType(204)]
+	[ProducesResponseType(404)]
+	public async Task<ActionResult> OrganizeEpisode([FromRoute] string id, [FromBody] EpisodeFileOrganizationRequest request, CancellationToken cancellationToken)
+	{
+		if (_fileOrganizationService.GetResult(id) == null)
+		{
+			return NotFound();
+		}
+		if (request == null)
+		{
+			return BadRequest("A correction request is required.");
+		}
+		string? text = ValidateEpisodeRequest(request);
+		if (text != null)
+		{
+			return BadRequest(text);
+		}
+		request.ResultId = id;
+		try
+		{
+			await _fileOrganizationService.PerformOrganization(request, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+			return NoContent();
+		}
+		catch (OrganizationException exception)
+		{
+			return OrganizationProblem(exception);
+		}
+	}
 
-            return NoContent();
-        }
+	[HttpPost("{id}/Movie/Organize")]
+	[ProducesResponseType(204)]
+	[ProducesResponseType(404)]
+	public async Task<ActionResult> OrganizeMovie([FromRoute] string id, [FromBody] MovieFileOrganizationRequest request, CancellationToken cancellationToken)
+	{
+		if (_fileOrganizationService.GetResult(id) == null)
+		{
+			return NotFound();
+		}
+		if (request == null)
+		{
+			return BadRequest("A correction request is required.");
+		}
+		string? text = ValidateMovieRequest(request);
+		if (text != null)
+		{
+			return BadRequest(text);
+		}
+		request.ResultId = id;
+		try
+		{
+			await _fileOrganizationService.PerformOrganization(request, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+			return NoContent();
+		}
+		catch (OrganizationException exception)
+		{
+			return OrganizationProblem(exception);
+		}
+	}
 
-        /// <summary>
-        /// Performs an organization.
-        /// </summary>
-        /// <param name="id">Result id.</param>
-        /// <response code="204">Performing organization.</response>
-        /// <returns>A <see cref="NoContentResult"/> indicating success.</returns>
-        [HttpPost("{id}/Organize")]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
-        public ActionResult PerformOrganization([FromRoute] string id)
-        {
-            // Don't await this
-            var task = InternalFileOrganizationService.PerformOrganization(id);
+	[HttpGet("SmartMatches")]
+	[ProducesResponseType(200)]
+	public ActionResult<QueryResult<SmartMatchResult>> GetSmartMatchInfos([FromQuery] int? startIndex, [FromQuery] int? limit)
+	{
+		if (!TryCreateQuery(startIndex, limit, out FileOrganizationResultQuery query, out string error))
+		{
+			return BadRequest(error);
+		}
+		return _fileOrganizationService.GetSmartMatchInfos(query);
+	}
 
-            // Async processing (close dialog early instead of waiting until the file has been copied)
-            // Wait 2s for exceptions that may occur to have them forwarded to the client for immediate error display
-            task.Wait(2000);
+	[HttpPost("SmartMatches/Delete")]
+	[ProducesResponseType(204)]
+	public async Task<ActionResult> DeleteSmartWatchEntry([FromBody] SmartMatchDeleteRequest request, CancellationToken cancellationToken)
+	{
+		if (request?.Entries == null || request.Entries.Count == 0)
+		{
+			return BadRequest("At least one smart-match entry is required.");
+		}
+		foreach (NameValuePair entry in request.Entries)
+		{
+			if (entry == null || string.IsNullOrWhiteSpace(entry.Name) || string.IsNullOrWhiteSpace(entry.Value))
+			{
+				return BadRequest("Each smart-match entry must include an id and value.");
+			}
+			cancellationToken.ThrowIfCancellationRequested();
+			await _fileOrganizationService.DeleteSmartMatchEntry(entry.Name, entry.Value, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+		}
+		return NoContent();
+	}
 
-            return NoContent();
-        }
+	private static bool TryCreateQuery(int? startIndex, int? limit, out FileOrganizationResultQuery query, out string error)
+	{
+		query = new FileOrganizationResultQuery();
+		error = string.Empty;
+		if (startIndex < 0)
+		{
+			error = "StartIndex cannot be negative.";
+			return false;
+		}
+		if (limit <= 0 || limit > 1000)
+		{
+			error = "Limit must be between 1 and 1000 when specified.";
+			return false;
+		}
+		query = new FileOrganizationResultQuery
+		{
+			Limit = limit,
+			StartIndex = startIndex
+		};
+		return true;
+	}
 
-        /// <summary>
-        /// Performs organization of a tv episode.
-        /// </summary>
-        /// <param name="id">Result id.</param>
-        /// <param name="seriesId">Series id.</param>
-        /// <param name="seasonNumber">Season number.</param>
-        /// <param name="episodeNumber">Episode number.</param>
-        /// <param name="endingEpisodeNumber">Ending episode number.</param>
-        /// <param name="newSeriesName">Name of a series to add.</param>
-        /// <param name="newSeriesYear">Year of a series to add.</param>
-        /// <param name="newSeriesProviderIds">A list of provider IDs identifying a new series.</param>
-        /// <param name="rememberCorrection">Whether or not to apply the same correction to future episodes of the same series.</param>
-        /// <param name="targetFolder">Target folder.</param>
-        /// <response code="204">Organization performed successfully.</response>
-        /// <returns>An <see cref="NoContentResult"/> indicating success.</returns>
-        [HttpPost("{id}/Episode/Organize")]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
-        public ActionResult OrganizeEpisode(
-            [FromRoute] string id,
-            [FromQuery] string seriesId,
-            [FromQuery] int seasonNumber,
-            [FromQuery] int episodeNumber,
-            [FromQuery] int? endingEpisodeNumber,
-            [FromQuery] string newSeriesName,
-            [FromQuery] int? newSeriesYear,
-            [FromQuery] Dictionary<string, string> newSeriesProviderIds,
-            [FromQuery] bool rememberCorrection,
-            [FromQuery] string targetFolder)
-        {
-            // Don't await this
-            var task = InternalFileOrganizationService.PerformOrganization(new EpisodeFileOrganizationRequest
-            {
-                EndingEpisodeNumber = endingEpisodeNumber,
-                EpisodeNumber = episodeNumber,
-                RememberCorrection = rememberCorrection,
-                ResultId = id,
-                SeasonNumber = seasonNumber,
-                SeriesId = seriesId,
-                NewSeriesName = newSeriesName,
-                NewSeriesYear = newSeriesYear,
-                NewSeriesProviderIds = newSeriesProviderIds ?? new Dictionary<string, string>(),
-                TargetFolder = targetFolder
-            });
+	private static string? ValidateEpisodeRequest(EpisodeFileOrganizationRequest request)
+	{
+		if (request.SeasonNumber < 0)
+		{
+			return "SeasonNumber cannot be negative.";
+		}
+		if (request.EpisodeNumber <= 0)
+		{
+			return "EpisodeNumber must be positive.";
+		}
+		if (request.EndingEpisodeNumber.HasValue && request.EndingEpisodeNumber.Value < request.EpisodeNumber)
+		{
+			return "EndingEpisodeNumber cannot be less than EpisodeNumber.";
+		}
+		if (string.IsNullOrWhiteSpace(request.SeriesId) && (string.IsNullOrWhiteSpace(request.NewSeriesName) || string.IsNullOrWhiteSpace(request.TargetFolder)))
+		{
+			return "A series id or both a new-series name and target folder are required.";
+		}
+		return null;
+	}
 
-            // Async processing (close dialog early instead of waiting until the file has been copied)
-            // Wait 2s for exceptions that may occur to have them forwarded to the client for immediate error display
-            task.Wait(2000);
+	private static string? ValidateMovieRequest(MovieFileOrganizationRequest request)
+	{
+		if (string.IsNullOrWhiteSpace(request.MovieId) && (string.IsNullOrWhiteSpace(request.NewMovieName) || string.IsNullOrWhiteSpace(request.TargetFolder)))
+		{
+			return "A movie id or both a new-movie name and target folder are required.";
+		}
+		return null;
+	}
 
-            return NoContent();
-        }
-
-        /// <summary>
-        /// Performs organization of a movie.
-        /// </summary>
-        /// <param name="id">Result id.</param>
-        /// <param name="movieId">Movie id.</param>
-        /// <param name="newMovieName">Name of a movie to add.</param>
-        /// <param name="newMovieYear">Year of a movie to add.</param>
-        /// <param name="newMovieProviderIds">A list of provider IDs identifying a new movie.</param>
-        /// <param name="targetFolder">Target Folder.</param>
-        /// <response code="204">Organization performed successfully.</response>
-        /// <returns>A <see cref="NoContentResult"/> indicating success.</returns>
-        [HttpPost("{id}/Movie/Organize")]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
-        public ActionResult OrganizeMovie(
-            [FromRoute] string id,
-            [FromQuery] string movieId,
-            [FromQuery] string newMovieName,
-            [FromQuery] int? newMovieYear,
-            [FromQuery] Dictionary<string, string> newMovieProviderIds,
-            [FromQuery] string targetFolder)
-        {
-            // Don't await this
-            var task = InternalFileOrganizationService.PerformOrganization(new MovieFileOrganizationRequest
-            {
-                ResultId = id,
-                MovieId = movieId,
-                NewMovieName = newMovieName,
-                NewMovieYear = newMovieYear,
-                NewMovieProviderIds = newMovieProviderIds ?? new Dictionary<string, string>(),
-                TargetFolder = targetFolder
-            });
-
-            // Async processing (close dialog early instead of waiting until the file has been copied)
-            // Wait 2s for exceptions that may occur to have them forwarded to the client for immediate error display
-            task.Wait(2000);
-
-            return NoContent();
-        }
-
-        /// <summary>
-        /// Gets smart match entries.
-        /// </summary>
-        /// <param name="startIndex">Optional. The record index to start at. All items with a lower index will be dropped from the results.</param>
-        /// <param name="limit">Optional. The maximum number of records to return.</param>
-        /// <response code="200">Smart watch entries returned.</response>
-        /// <returns>A <see cref="QueryResult{SmartWatchResult}"/>.</returns>
-        [HttpGet("SmartMatches")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public ActionResult<QueryResult<SmartMatchResult>> GetSmartMatchInfos(int? startIndex, int? limit)
-        {
-            var result = InternalFileOrganizationService.GetSmartMatchInfos(new FileOrganizationResultQuery
-            {
-                Limit = limit,
-                StartIndex = startIndex
-            });
-
-            return result;
-        }
-
-        /// <summary>
-        /// Deletes a smart match entry.
-        /// </summary>
-        /// <param name="entries">SmartMatch Entry.</param>
-        /// <response code="204">Smart watch entry deleted.</response>
-        /// <returns>A <see cref="NoContentResult"/> indicating success.</returns>
-        [HttpPost("SmartMatches/Delete")]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
-        public ActionResult DeleteSmartWatchEntry([FromQuery] IReadOnlyList<NameValuePair> entries)
-        {
-            foreach (var entry in entries)
-            {
-                InternalFileOrganizationService.DeleteSmartMatchEntry(entry.Name, entry.Value);
-            }
-
-            return NoContent();
-        }
-    }
+	private ObjectResult OrganizationProblem(OrganizationException exception)
+	{
+		return Problem(exception.Message, null, 409, "The file could not be organized safely.");
+	}
 }
