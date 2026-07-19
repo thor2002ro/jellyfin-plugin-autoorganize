@@ -163,13 +163,6 @@ public class OrganizerScheduledTask : IScheduledTask, IConfigurableScheduledTask
 
 	public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
 	{
-		return new TaskTriggerInfo[1]
-		{
-			new TaskTriggerInfo
-			{
-				Type = TaskTriggerInfoType.IntervalTrigger,
-				IntervalTicks = TimeSpan.FromMinutes(5L).Ticks
-			}
-		};
+		return Array.Empty<TaskTriggerInfo>();
 	}
 }

@@ -1,44 +1,139 @@
 # Auto Organize for Jellyfin 10.11
 
-> Community maintenance build derived from the archived MIT-licensed Auto Organize plugin. It is not an official Jellyfin release.
+Community maintenance fork of the archived Auto Organize plugin. This fork targets Jellyfin **10.11.11**, **.NET 9**, and is not an official Jellyfin release.
 
-This source tree updates the archived Jellyfin Auto Organize plugin for Jellyfin **10.11.11** and **.NET 9**. It retains the Jellyfin-native dependency-injection, naming-parser, path-safety, crash-safe transfer, and SQLite recovery work while incorporating useful behavior from the maintained Emby sibling.
+## What this fork adds
 
-## New organization options
+- Jellyfin 10.11 plugin/runtime port with Jellyfin-native dependency injection, hosted startup migration, elevated API endpoints, and embedded dashboard pages.
+- TV episode and movie organization from configurable watch folders.
+- Approval-first workflow: detected items can be approved, rejected, corrected manually, retried, refreshed, approved in bulk, or deleted from the activity log.
+- TV season bundle detection for whole season folders, including multi-season bundles for the same show.
+- Subtitle organization for sidecars and standalone subtitle files.
+- Lingua-backed `.srt` language detection, including standalone subtitles that do not have a video file beside them.
+- Safer transfers with staged copy/commit, source deletion only after the target is written, overwrite checks, cancellation cleanup, duplicate subtitle target detection, and same-path protection.
+- Path safety checks for watch folders, library roots, symlink traversal, and overlapping TV/movie watch folders.
+- SQLite activity-log and smart-match storage with WAL mode, corrupt database backup, malformed row cleanup, duplicate smart-match merge, and bundle-item persistence.
+- Modernized Jellyfin dashboard pages for activity, TV settings, movie settings, and smart matches.
+- Release metadata and regression runner for the fork.
 
-### TV
+## Default behavior
+
+New TV and movie organizer options are conservative by default:
+
+- Require approval before organizing: enabled.
+- Preserve original incoming filenames: enabled.
+- Overwrite existing destination files: disabled.
+- Copy original file: disabled, so approved organization moves files.
+- Minimum video file size: 50 MB.
+- Delete empty source folders after moving: enabled.
+- Extended cleanup: disabled.
+- Queue a library scan after organizing: disabled.
+- Default scheduled triggers: none. Run the task manually or add a Jellyfin schedule.
+
+TV defaults also enable season folders and use `Season %s`. Movie defaults create one folder per movie using `%mn (%my)` and keep the original movie filename.
+
+## TV organization
+
+TV files are parsed with Jellyfin's 10.11 naming library. The organizer can match existing series and episodes, auto-detect series through configured metadata providers, or create pending library items for approval.
+
+Useful TV options:
 
 - **Preserve original episode filename** stores the incoming basename and extension unchanged.
-- **Always place episodes in season folders** forces the configured season folder pattern even when an existing series currently has a flat layout.
+- **Always place episodes in season folders** uses the configured season folder pattern even when an existing series currently stores episodes directly in the series root.
+- **Series folder pattern** controls new-series folder names.
+- **Default TV library** controls where new detected series are created.
 
-With both enabled, an incoming file such as:
+With preserve-original-filename and season folders enabled:
 
 ```text
 The.Show.S02E04.1080p.WEB-DL-GROUP.mkv
 ```
 
-is placed as:
+can become:
 
 ```text
-TV/The Show (2026)/Season 02/The.Show.S02E04.1080p.WEB-DL-GROUP.mkv
+TV/The Show (2026)/Season 2/The.Show.S02E04.1080p.WEB-DL-GROUP.mkv
 ```
 
-The example uses the season-folder pattern `Season %0s`; other configured
-season-folder patterns are respected.
+The season directory follows your configured `SeasonFolderPattern`.
 
-### Movies
+## TV season bundles
+
+When approval is enabled, a watch folder containing a whole TV season can be detected as one pending bundle instead of many unrelated rows. Bundle approval stores every source-to-target item and then organizes the approved set together.
+
+Season bundles support:
+
+- Season folders containing video files and matching subtitle sidecars.
+- Multi-season folders for the same detected show.
+- Metadata refresh before approval.
+- Per-item safety checks at approval time.
+- Partial result reporting: organized, skipped, and failed counts.
+
+## Movie organization
+
+Movie files are parsed with Jellyfin's naming library. The organizer can match existing movies, auto-detect through configured providers, or create pending movie items for approval.
+
+Useful movie options:
 
 - **Preserve original movie filename** stores the incoming basename and extension unchanged.
-- Enable **Create subdirectory per Movie** to produce `Movie Name (Year)/original-filename.ext`.
+- **Create a subdirectory for each movie** places files under a movie folder.
+- **Movie folder pattern** controls the folder name, defaulting to `%mn (%my)`.
+- **Default movie library** controls where new detected movies are created.
 
-## Other parity and regression fixes
+With the default movie folder option:
 
-- Exact provider search followed by a normalized dotted/underscored/hyphenated-title retry.
-- Manual creation works without provider IDs.
-- Explicitly selected library roots are retained for manual corrections.
-- Duplicate terminal year suffixes such as `The Office (2005) (2005)` are prevented.
-- Input filename parsing remains delegated to Jellyfin's 10.11 naming library.
-- Administration scripts remain plugin-local and do not modify the shared API client prototype.
+```text
+Avatar.2009.1080p.mkv
+```
+
+can become:
+
+```text
+Movies/Avatar (2009)/Avatar.2009.1080p.mkv
+```
+
+## Subtitles
+
+Subtitle support covers both sidecars and single subtitle files.
+
+Supported subtitle extensions:
+
+```text
+.srt .ass .ssa .sub .idx .vtt .smi .sami .sup
+```
+
+Behavior:
+
+- A subtitle beside an organized video is moved or copied with that video.
+- A subtitle without a matching video in the same watch-folder scan is processed on its own.
+- Standalone episode subtitles are parsed as if they were episode video files, then matched to existing Jellyfin episodes.
+- Standalone movie subtitles are parsed as if they were movie video files, then matched to existing Jellyfin movies.
+- Explicit two-letter or three-letter language suffixes are normalized to ISO-639-3, for example `en` becomes `eng`.
+- Bare `.srt` files use bundled Lingua language models to infer a language suffix when possible.
+- Non-`.srt` subtitles keep explicit language suffixes when present; otherwise they are named from the matched media item without language detection.
+
+The release package must include `Lingua.dll` and `Lingua/LanguageModels` next to `AutoOrganize.dll`.
+
+## Matching and corrections
+
+This fork keeps Jellyfin's parser as the source of truth and adds fork-specific matching fixes:
+
+- Remote provider searches retry normalized dotted, underscored, and hyphenated release titles.
+- Manual new-series and new-movie creation works without provider IDs.
+- Manual corrections keep the selected target library root.
+- Generated names avoid duplicate terminal years such as `The Office (2005) (2005)`.
+- Smart matches remember approved corrections and can be managed from the Smart Matches page.
+
+## Safety notes
+
+- TV and movie watch folders must not overlap each other.
+- Watch folders that overlap Jellyfin library roots are skipped.
+- Symlink traversal is rejected for organization and cleanup.
+- Targets must stay inside configured Jellyfin library roots.
+- Existing targets are skipped unless overwrite is enabled.
+- Source cleanup only runs inside configured watch folders.
+
+Back up your Jellyfin configuration and media library before first use. Test with approval enabled and a small watch folder before allowing unattended moves.
 
 ## Build
 
@@ -56,8 +151,20 @@ Run the regression suite with:
 dotnet run --project AutoOrganize.Tests/AutoOrganize.Tests.csproj -c Release
 ```
 
-See `VALIDATION.md` for the completed release checks and remaining runtime caveat.
-
 ## Installation
 
-Create an Auto Organize plugin directory under Jellyfin's plugin data directory, copy the contents of `AutoOrganize/bin/Release/net9.0/` into it, and restart Jellyfin. The Lingua subtitle language detector requires `Lingua.dll` and `Lingua/LanguageModels` alongside `AutoOrganize.dll`. Back up the Jellyfin configuration and media library before first use, then test with copy mode and a small watch folder before enabling moves or overwrites.
+Create an Auto Organize plugin directory under Jellyfin's plugin data directory, copy the contents of `AutoOrganize/bin/Release/net9.0/` into it, and restart Jellyfin.
+
+The package artifacts are:
+
+```text
+AutoOrganize.dll
+Lingua.dll
+Lingua/LanguageModels
+```
+
+`Lingua.dll` and `Lingua/LanguageModels` are required for subtitle language detection.
+
+## License
+
+This fork is licensed under GPL-3.0-or-later.

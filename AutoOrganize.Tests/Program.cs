@@ -550,7 +550,10 @@ internal static class Program
             Contains("Jellyfin logs: AutoOrganize", folderSource);
             False(folderSource.Contains("File.AppendAllText", StringComparison.Ordinal));
             False(folderSource.Contains("Directory.CreateDirectory(_logDirectoryPath)", StringComparison.Ordinal));
-            Contains("public bool IsLogged => true;", File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Core", "OrganizerScheduledTask.cs")));
+            string scheduledTaskSource = File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Core", "OrganizerScheduledTask.cs"));
+            Contains("public bool IsLogged => true;", scheduledTaskSource);
+            Contains("return Array.Empty<TaskTriggerInfo>();", scheduledTaskSource);
+            False(scheduledTaskSource.Contains("TimeSpan.FromMinutes(5L)", StringComparison.Ordinal));
             Contains("SeasonNumber", File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Model", "FileOrganizationResult.cs")));
             Contains("DeleteBundledFileResults(result", folderSource);
             Contains("_organizationService.GetResultBySourcePath(sourcePath)", folderSource);
