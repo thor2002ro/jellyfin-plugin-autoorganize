@@ -65,6 +65,7 @@ let organizeTaskRunning = false;
 let organizeTaskId = null;
 let organizeTaskRefreshTimer = null;
 let organizeTaskRefreshRetries = 0;
+let organizeTaskEntryRefreshTimer = null;
 
 function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, function (character) {
@@ -108,7 +109,11 @@ async function refreshOrganizeTaskState(page) {
         const task = await getAutoOrganizeTask();
         organizeTaskId = task?.Id || null;
         const running = isTaskRunning(task);
+        const wasRunning = organizeTaskRunning;
         setOrganizeTaskRunning(page, running);
+        if (wasRunning && !running) {
+            reloadItems(page);
+        }
         return running;
     } catch {
         setOrganizeTaskRunning(page, false);
@@ -788,6 +793,24 @@ function onServerEvent(event, apiClient, data) {
     }
 }
 
+function setServerEvents(enabled) {
+    const events = [
+        'AutoOrganize_LogReset',
+        'AutoOrganize_ItemUpdated',
+        'AutoOrganize_ItemRemoved',
+        'AutoOrganize_ItemAdded',
+        'ScheduledTaskStarted',
+        'ScheduledTaskEnded'
+    ];
+    for (const event of events) {
+        if (enabled) {
+            Events.on(ServerNotifications, event, onServerEvent);
+        } else {
+            Events.off(ServerNotifications, event, onServerEvent);
+        }
+    }
+}
+
 function updateItemStatus(page, item) {
     if (!page || !item?.Id) {
         return;
@@ -874,9 +897,7 @@ export default function (view) {
     });
     view.querySelector('.btnOrganize').addEventListener('click', function (event) {
         if (!organizeTaskRunning) {
-            setTimeout(function () {
-                setOrganizeTaskRunning(view, true);
-            }, 0);
+            setOrganizeTaskRunning(view, true);
             scheduleOrganizeTaskRefresh(view, 1000, 3);
             return;
         }
@@ -891,12 +912,8 @@ export default function (view) {
         LibraryMenu.setTabs('autoorganize', 0, getTabs);
         reloadItems(view);
 
-        Events.on(ServerNotifications, 'AutoOrganize_LogReset', onServerEvent);
-        Events.on(ServerNotifications, 'AutoOrganize_ItemUpdated', onServerEvent);
-        Events.on(ServerNotifications, 'AutoOrganize_ItemRemoved', onServerEvent);
-        Events.on(ServerNotifications, 'AutoOrganize_ItemAdded', onServerEvent);
-        Events.on(ServerNotifications, 'ScheduledTaskStarted', onServerEvent);
-        Events.on(ServerNotifications, 'ScheduledTaskEnded', onServerEvent);
+        setServerEvents(false);
+        setServerEvents(true);
 
         TaskButton({
             mode: 'on',
@@ -907,8 +924,16 @@ export default function (view) {
         });
         refreshOrganizeTaskState(view);
         scheduleOrganizeTaskRefresh(view, 1000, 2);
-        setTimeout(function () {
-            refreshOrganizeTaskState(view);
+        clearTimeout(organizeTaskEntryRefreshTimer);
+        organizeTaskEntryRefreshTimer = setTimeout(async function () {
+            if (pageGlobal !== view) {
+                return;
+            }
+            const wasRunning = organizeTaskRunning;
+            await refreshOrganizeTaskState(view);
+            if (!wasRunning) {
+                reloadItems(view);
+            }
         }, 3000);
     });
 
@@ -916,13 +941,9 @@ export default function (view) {
         reloadGeneration++;
         currentResult = { Items: [], TotalRecordCount: 0 };
         clearTimeout(organizeTaskRefreshTimer);
+        clearTimeout(organizeTaskEntryRefreshTimer);
 
-        Events.off(ServerNotifications, 'AutoOrganize_LogReset', onServerEvent);
-        Events.off(ServerNotifications, 'AutoOrganize_ItemUpdated', onServerEvent);
-        Events.off(ServerNotifications, 'AutoOrganize_ItemRemoved', onServerEvent);
-        Events.off(ServerNotifications, 'AutoOrganize_ItemAdded', onServerEvent);
-        Events.off(ServerNotifications, 'ScheduledTaskStarted', onServerEvent);
-        Events.off(ServerNotifications, 'ScheduledTaskEnded', onServerEvent);
+        setServerEvents(false);
 
         TaskButton({
             mode: 'off',

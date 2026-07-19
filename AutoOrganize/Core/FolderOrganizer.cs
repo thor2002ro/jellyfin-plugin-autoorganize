@@ -578,7 +578,7 @@ public sealed class FolderOrganizer
 				continue;
 			}
 			FileOrganizationResult first = seasons[0];
-			string sourceRoot = Path.GetDirectoryName(first.OriginalPath) ?? first.OriginalPath;
+			string sourceRoot = first.OriginalPath;
 			string? targetRoot = GetMergedTargetPath(seasons);
 			var sourcePaths = new HashSet<string>(PathSafety.PathComparer);
 			List<FileOrganizationBundleItem> items = seasons
