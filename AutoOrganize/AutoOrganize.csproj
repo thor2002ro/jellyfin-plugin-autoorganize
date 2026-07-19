@@ -13,6 +13,7 @@
     <NoWarn>$(NoWarn);1591</NoWarn>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <EnableNETAnalyzers>false</EnableNETAnalyzers>
     <RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
   </PropertyGroup>
@@ -44,12 +45,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Diacritics" Version="4.1.8" />
     <PackageReference Include="Jellyfin.Controller" Version="10.11.11" ExcludeAssets="runtime" />
     <PackageReference Include="Jellyfin.Database.Implementations" Version="10.11.11" ExcludeAssets="runtime" />
     <PackageReference Include="Jellyfin.Model" Version="10.11.11" ExcludeAssets="runtime" />
     <PackageReference Include="Jellyfin.Naming" Version="10.11.11" ExcludeAssets="runtime" />
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="9.0.11" ExcludeAssets="runtime" />
+    <PackageReference Include="SearchPioneer.Lingua" Version="1.0.5" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 

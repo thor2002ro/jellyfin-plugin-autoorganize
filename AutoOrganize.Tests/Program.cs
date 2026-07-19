@@ -387,6 +387,14 @@ internal static class Program
             Equal(PathSafety.Normalize(root), PathSafety.GetAuthorizedLibraryRoot(root, new[] { root }));
             Throws<OrganizationException>(() => PathSafety.GetAuthorizedLibraryRoot(nested, new[] { root }));
         });
+        Add("missing target library falls back to the only configured root", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string root = Path.Combine(temporary.Path, "library");
+            Directory.CreateDirectory(root);
+            Equal(PathSafety.Normalize(root), PathSafety.GetAuthorizedLibraryRoot(null, new[] { root }));
+            Throws<OrganizationException>(() => PathSafety.GetAuthorizedLibraryRoot(null, new[] { root, Path.Combine(temporary.Path, "other") }));
+        });
         Add("relative paths are rejected", () =>
         {
             False(PathSafety.TryNormalize("relative/path", out _));
@@ -442,6 +450,121 @@ internal static class Program
             await SafeFileTransfer.TransferAsync(source, target, copySource: false, overwrite: false, CancellationToken.None).ConfigureAwait(false);
             False(File.Exists(source));
             SequenceEqual(content, await File.ReadAllBytesAsync(target).ConfigureAwait(false));
+        });
+        AddAsync("safe move carries subtitle sidecars and preserves language suffixes", async () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string source = Path.Combine(temporary.Path, "Avatar.2009.mkv");
+            string subtitle = Path.Combine(temporary.Path, "Avatar.2009.en.forced.srt");
+            string ignored = Path.Combine(temporary.Path, "Avatar.2009.nfo");
+            string target = Path.Combine(temporary.Path, "target", "Avatar (2009)", "Avatar (2009).mkv");
+            await File.WriteAllBytesAsync(source, CreateContent(1024)).ConfigureAwait(false);
+            await File.WriteAllTextAsync(subtitle, "subtitle").ConfigureAwait(false);
+            await File.WriteAllTextAsync(ignored, "metadata").ConfigureAwait(false);
+            await SafeFileTransfer.TransferAsync(source, target, copySource: false, overwrite: false, CancellationToken.None).ConfigureAwait(false);
+            False(File.Exists(source));
+            False(File.Exists(subtitle));
+            True(File.Exists(ignored));
+            Equal("subtitle", await File.ReadAllTextAsync(Path.Combine(temporary.Path, "target", "Avatar (2009)", "Avatar (2009).eng.srt")).ConfigureAwait(false));
+            False(File.Exists(Path.Combine(temporary.Path, "target", "Avatar (2009)", "Avatar (2009).en.forced.srt")));
+        });
+        AddAsync("exact subtitle sidecars do not treat title tokens as language", async () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string source = Path.Combine(temporary.Path, "Stephen.Kings.It.mkv");
+            string subtitle = Path.Combine(temporary.Path, "Stephen.Kings.It.srt");
+            string target = Path.Combine(temporary.Path, "target", "Stephen King's It (1990)", "Stephen King's It (1990).mkv");
+            await File.WriteAllBytesAsync(source, CreateContent(1024)).ConfigureAwait(false);
+            await File.WriteAllTextAsync(subtitle, string.Empty).ConfigureAwait(false);
+            await SafeFileTransfer.TransferAsync(source, target, copySource: false, overwrite: false, CancellationToken.None).ConfigureAwait(false);
+            True(File.Exists(Path.Combine(temporary.Path, "target", "Stephen King's It (1990)", "Stephen King's It (1990).srt")));
+            False(File.Exists(Path.Combine(temporary.Path, "target", "Stephen King's It (1990)", "Stephen King's It (1990).ita.srt")));
+        });
+        Add("subtitle sidecar matching treats wildcard characters literally", () =>
+        {
+            True(SafeFileTransfer.IsSidecarFor(Path.Combine("watch", "What If...?.en.srt"), "What If...?"));
+            False(SafeFileTransfer.IsSidecarFor(Path.Combine("watch", "What If...X.en.srt"), "What If...?"));
+        });
+        AddAsync("subtitle sidecar conflict leaves video source in place", async () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string source = Path.Combine(temporary.Path, "Avatar.2009.mkv");
+            string subtitle = Path.Combine(temporary.Path, "Avatar.2009.en.srt");
+            string target = Path.Combine(temporary.Path, "target", "Avatar (2009)", "Avatar (2009).mkv");
+            string targetSubtitle = Path.Combine(temporary.Path, "target", "Avatar (2009)", "Avatar (2009).eng.srt");
+            await File.WriteAllBytesAsync(source, CreateContent(1024)).ConfigureAwait(false);
+            await File.WriteAllTextAsync(subtitle, "new subtitle").ConfigureAwait(false);
+            Directory.CreateDirectory(Path.GetDirectoryName(targetSubtitle) ?? temporary.Path);
+            await File.WriteAllTextAsync(targetSubtitle, "existing subtitle").ConfigureAwait(false);
+            await ThrowsAsync<IOException>(() => SafeFileTransfer.TransferAsync(source, target, copySource: false, overwrite: false, CancellationToken.None)).ConfigureAwait(false);
+            True(File.Exists(source));
+            True(File.Exists(subtitle));
+            False(File.Exists(target));
+            Equal("existing subtitle", await File.ReadAllTextAsync(targetSubtitle).ConfigureAwait(false));
+        });
+        AddAsync("duplicate subtitle sidecar targets leave video source in place", async () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string source = Path.Combine(temporary.Path, "Avatar.2009.mkv");
+            string subtitle = Path.Combine(temporary.Path, "Avatar.2009.en.srt");
+            string forcedSubtitle = Path.Combine(temporary.Path, "Avatar.2009.en.forced.srt");
+            string target = Path.Combine(temporary.Path, "target", "Avatar (2009)", "Avatar (2009).mkv");
+            await File.WriteAllBytesAsync(source, CreateContent(1024)).ConfigureAwait(false);
+            await File.WriteAllTextAsync(subtitle, "plain").ConfigureAwait(false);
+            await File.WriteAllTextAsync(forcedSubtitle, "forced").ConfigureAwait(false);
+            await ThrowsAsync<IOException>(() => SafeFileTransfer.TransferAsync(source, target, copySource: false, overwrite: false, CancellationToken.None)).ConfigureAwait(false);
+            True(File.Exists(source));
+            True(File.Exists(subtitle));
+            True(File.Exists(forcedSubtitle));
+            False(File.Exists(target));
+        });
+        Add("subtitle target names use the matched media basename", () =>
+        {
+            string target = SafeFileTransfer.GetSubtitleTargetPath(
+                Path.Combine("watch", "Avatar.2009.en.forced.srt"),
+                Path.Combine("library", "Avatar (2009)", "Avatar (2009).mkv"));
+            Equal(Path.Combine("library", "Avatar (2009)", "Avatar (2009).eng.srt"), target);
+            True(SafeFileTransfer.IsSubtitleFile(target));
+        });
+        Add("subtitle target names ignore invalid short title tokens", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string subtitle = Path.Combine(temporary.Path, "The.OA.srt");
+            File.WriteAllText(subtitle, string.Empty);
+            string target = SafeFileTransfer.GetSubtitleTargetPath(
+                subtitle,
+                Path.Combine(temporary.Path, "library", "The OA (2016)", "The OA (2016).mkv"));
+            Equal(Path.Combine(temporary.Path, "library", "The OA (2016)", "The OA (2016).srt"), target);
+        });
+        Add("bare srt target names use detected subtitle language", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string subtitle = Path.Combine(temporary.Path, "Avatar.2009.srt");
+            File.WriteAllText(subtitle, "1\n00:00:01,000 --> 00:00:02,000\nNu este pentru cine stie ce, dar sunt aici.\n");
+            string target = SafeFileTransfer.GetSubtitleTargetPath(
+                subtitle,
+                Path.Combine(temporary.Path, "library", "Avatar (2009)", "Avatar (2009).mkv"));
+            Equal(Path.Combine(temporary.Path, "library", "Avatar (2009)", "Avatar (2009).ron.srt"), target);
+        });
+        Add("explicit subtitle language beats content detection", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string subtitle = Path.Combine(temporary.Path, "Avatar.2009.en.srt");
+            File.WriteAllText(subtitle, "1\n00:00:01,000 --> 00:00:02,000\nNu este pentru cine stie ce, dar sunt aici.\n");
+            string target = SafeFileTransfer.GetSubtitleTargetPath(
+                subtitle,
+                Path.Combine(temporary.Path, "library", "Avatar (2009)", "Avatar (2009).mkv"));
+            Equal(Path.Combine(temporary.Path, "library", "Avatar (2009)", "Avatar (2009).eng.srt"), target);
+        });
+        Add("explicit three-letter subtitle language is preserved", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string subtitle = Path.Combine(temporary.Path, "Avatar.2009.eng.srt");
+            File.WriteAllText(subtitle, "1\n00:00:01,000 --> 00:00:02,000\nNu este pentru cine stie ce, dar sunt aici.\n");
+            string target = SafeFileTransfer.GetSubtitleTargetPath(
+                subtitle,
+                Path.Combine(temporary.Path, "library", "Avatar (2009)", "Avatar (2009).mkv"));
+            Equal(Path.Combine(temporary.Path, "library", "Avatar (2009)", "Avatar (2009).eng.srt"), target);
         });
         AddAsync("safe overwrite replaces destination atomically", async () =>
         {
@@ -545,6 +668,26 @@ internal static class Program
                 throw new InvalidOperationException("One or more plugin types could not be loaded:" + Environment.NewLine + loaderErrors, exception);
             }
         });
+        Add("Lingua runtime files stay in package and install instructions", () =>
+        {
+            string buildManifest = ReadRepositoryFile("build.yaml");
+            Contains("- \"AutoOrganize.dll\"", buildManifest);
+            Contains("- \"Lingua.dll\"", buildManifest);
+            Contains("- \"Lingua/LanguageModels\"", buildManifest);
+            string readme = ReadRepositoryFile("README.md");
+            Contains("copy the contents of `AutoOrganize/bin/Release/net9.0/`", readme);
+            Contains("`Lingua.dll`", readme);
+            Contains("`Lingua/LanguageModels`", readme);
+        });
+        Add("subtitle language detector unloads Lingua models after use", () =>
+        {
+            string source = File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Core", "SafeFileTransfer.cs"));
+            Contains("detector.UnloadLanguageModels();", source);
+            False(source.Contains("static readonly Lazy<LanguageDetector>", StringComparison.Ordinal));
+            Contains("WithLanguageModelsDirectory(GetBundledLanguageModelsDirectory())", source);
+            Contains("typeof(SafeFileTransfer).Assembly.Location", source);
+            Contains("AggregateException", source);
+        });
         Add("dashboard embeds all expected resources", () =>
         {
             Assembly assembly = typeof(EpisodeNameFormatter).Assembly;
@@ -602,13 +745,20 @@ internal static class Program
             Contains("btnApproveAll", ReadResource("AutoOrganize.Web.autoorganizelog.html"));
             Contains("btnApproveResult", logScript);
             Contains("btnRejectResult", logScript);
+            Contains("material-icons check\" aria-hidden=\"true", logScript);
+            False(logScript.Contains("material-icons check\">check", StringComparison.Ordinal));
+            False(logScript.Contains("material-icons edit\">edit", StringComparison.Ordinal));
+            False(logScript.Contains("material-icons close\">close", StringComparison.Ordinal));
+            Contains("function isSubtitleFile", logScript);
+            Contains("&& !isSubtitleFile(item)", logScript);
+            Contains("function isDeletable", logScript);
+            Contains("} else if (isDeletable(item))", logScript);
             Contains("rejectOrganizationResult", logScript);
             Contains("formatFileSize", logScript);
             Contains("updateLogSummary", logScript);
             Contains("item.Type !== 'Log'", logScript);
             Contains("Matched: ", logScript);
             Contains("getMatchedMetadataText", logScript);
-            Contains("window.confirm('Clear every activity entry?", logScript);
             Contains("ApiClient.clearOrganizationLog", logScript);
             Contains("const requestQuery = { ...query }", logScript);
             Contains("generation !== reloadGeneration", logScript);
@@ -621,6 +771,7 @@ internal static class Program
                 string html = ReadResource($"AutoOrganize.Web.autoorganize{page}.html");
                 Contains("parseWatchLocations", script);
                 Contains("watchLocations.join('\\n')", script);
+                Contains("mediaLocations.length === 1 ? mediaLocations[0].value : ''", script);
                 Contains("One folder per line", html);
                 False(script.Contains("existingWatchLocations.slice(1)", StringComparison.Ordinal));
             }
@@ -1023,6 +1174,27 @@ internal static class Program
             ?? throw new InvalidOperationException($"Resource {name} was not found.");
         using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         return reader.ReadToEnd();
+    }
+
+    private static string ReadRepositoryFile(string name)
+    {
+        return File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), name));
+    }
+
+    private static string ReadRepositoryDirectory()
+    {
+        string? directory = Directory.GetCurrentDirectory();
+        while (!string.IsNullOrWhiteSpace(directory))
+        {
+            if (File.Exists(Path.Combine(directory, "build.yaml")))
+            {
+                return directory;
+            }
+
+            directory = Directory.GetParent(directory)?.FullName;
+        }
+
+        throw new DirectoryNotFoundException("Repository root was not found.");
     }
 
     private static byte[] CreateContent(int length)

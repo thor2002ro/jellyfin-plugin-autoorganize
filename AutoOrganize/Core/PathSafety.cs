@@ -77,15 +77,25 @@ internal static class PathSafety
 	public static string GetAuthorizedLibraryRoot(string? requestedRoot, IEnumerable<string> configuredRoots)
 	{
 		ArgumentNullException.ThrowIfNull(configuredRoots, "configuredRoots");
+		List<string> normalizedRoots = configuredRoots
+			.Select(root => TryNormalize(root, out string normalizedRoot) ? normalizedRoot : null)
+			.Where(root => root != null)
+			.Cast<string>()
+			.Distinct(PathComparer)
+			.ToList();
 		if (!TryNormalize(requestedRoot, out string normalizedPath))
 		{
+			if (normalizedRoots.Count == 1)
+			{
+				return normalizedRoots[0];
+			}
 			throw new OrganizationException("Target folder '" + requestedRoot + "' is not a valid absolute path.");
 		}
-		foreach (string configuredRoot in configuredRoots)
+		foreach (string normalizedRoot in normalizedRoots)
 		{
-			if (TryNormalize(configuredRoot, out string normalizedPath2) && PathComparer.Equals(normalizedPath2, normalizedPath))
+			if (PathComparer.Equals(normalizedRoot, normalizedPath))
 			{
-				return normalizedPath2;
+				return normalizedRoot;
 			}
 		}
 		throw new OrganizationException("Target folder '" + requestedRoot + "' is not a configured Jellyfin library location.");

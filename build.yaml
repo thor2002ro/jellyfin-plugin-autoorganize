@@ -11,6 +11,8 @@ description: "Automatically organize TV episodes and movies for Jellyfin 10.11"
 category: "General"
 artifacts:
   - "AutoOrganize.dll"
+  - "Lingua.dll"
+  - "Lingua/LanguageModels"
 changelog: |2-
   ### Jellyfin 10.11 and Emby parity update
   - Add explicit preserve-original-filename options for TV episodes and movies.

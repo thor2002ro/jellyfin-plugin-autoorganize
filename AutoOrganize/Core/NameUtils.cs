@@ -4,7 +4,6 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using Diacritics.Extensions;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Model.Providers;
 
@@ -140,7 +139,7 @@ public static class NameUtils
 
     private static string GetComparableName(string name)
     {
-        name = StringExtensions.RemoveDiacritics(name);
+        name = RemoveDiacritics(name);
         name = " " + name + " ";
         name = name.Replace('.', ' ').Replace('_', ' ').Replace(" and ", " ", StringComparison.OrdinalIgnoreCase)
             .Replace(".and.", " ", StringComparison.OrdinalIgnoreCase)
@@ -158,6 +157,21 @@ public static class NameUtils
             .Replace(" the ", string.Empty, StringComparison.OrdinalIgnoreCase)
             .Replace(" ", string.Empty, StringComparison.Ordinal);
         return name.Trim();
+    }
+
+    private static string RemoveDiacritics(string name)
+    {
+        string normalized = name.Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(normalized.Length);
+        foreach (char character in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
+            {
+                builder.Append(character);
+            }
+        }
+
+        return builder.ToString().Normalize(NormalizationForm.FormC);
     }
 
     private static string NormalizeReleaseSeparators(string name)

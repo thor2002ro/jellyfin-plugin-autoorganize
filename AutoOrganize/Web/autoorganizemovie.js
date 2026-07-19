@@ -257,7 +257,7 @@ export default function (view) {
 
             const select = view.querySelector('#selectMovieFolder');
             setSelectOptions(select, mediaLocations, mediaLocations.length > 1);
-            select.value = movieOptions.DefaultMovieLibraryPath || '';
+            select.value = movieOptions.DefaultMovieLibraryPath || (mediaLocations.length === 1 ? mediaLocations[0].value : '');
         }, onApiFailure);
     }
 

@@ -265,6 +265,10 @@ public class MovieFileOrganizer
 			}
 			if (requireApproval)
 			{
+				if (options.MovieFolder)
+				{
+					CreatePendingMovieFolder(result.TargetPath);
+				}
 				result.Status = FileSortingStatus.Detected;
 				result.StatusMessage = "Detected and waiting for approval.";
 				return;
@@ -316,6 +320,18 @@ public class MovieFileOrganizer
 		{
 			_libraryMonitor.ReportFileSystemChangeComplete(targetPath, refreshPath: true);
 		}
+	}
+
+	private void CreatePendingMovieFolder(string targetPath)
+	{
+		string? directory = Path.GetDirectoryName(targetPath);
+		if (string.IsNullOrWhiteSpace(directory))
+		{
+			throw new OrganizationException("The target path does not have a parent directory.");
+		}
+
+		PathSafety.EnsureWithinLibraryRoots(directory, GetLibraryRoots());
+		Directory.CreateDirectory(directory);
 	}
 
 	private async Task<Movie?> AutoDetectMovie(string movieName, int? movieYear, FileOrganizationResult result, MovieFileOrganizationOptions options, CancellationToken cancellationToken)

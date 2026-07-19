@@ -87,6 +87,18 @@ function isRejectable(item) {
     return item?.Status === 'Detected' && item.Type !== 'Log' && !item.IsInProgress;
 }
 
+function isSubtitleFile(item) {
+    return /\.(srt|ass|ssa|sub|idx|vtt|smi|sami|sup)$/i.test(item?.OriginalPath || item?.OriginalFileName || '');
+}
+
+function isEditable(item) {
+    return item?.Type !== 'Log' && !item?.IsInProgress && item?.Status !== 'Success' && !isSubtitleFile(item);
+}
+
+function isDeletable(item) {
+    return item?.Type !== 'Log' && !item?.IsInProgress && item?.Status !== 'Success';
+}
+
 function getStatusText(item) {
     if (item.IsInProgress) {
         return 'Organizing';
@@ -494,24 +506,29 @@ function renderItemRow(item) {
     }
 
     let buttons = '';
-    if (isApprovable(item)) {
-        buttons += '<button type="button" is="paper-icon-button-light" data-resultid="' + id +
-            '" class="btnApproveResult organizerButton autoSize" title="Approve" aria-label="Approve ' +
-            fileName + '"><span class="material-icons check">check</span></button>';
-    }
-    if (item.Type !== 'Log' && !item.IsInProgress && item.Status !== 'Success') {
-        buttons += '<button type="button" is="paper-icon-button-light" data-resultid="' + id +
-            '" class="btnProcessResult organizerButton autoSize" title="Approve or correct" aria-label="Approve or correct ' +
-            fileName + '"><span class="material-icons edit">edit</span></button>';
-    }
     if (isRejectable(item)) {
+        if (isApprovable(item)) {
+            buttons += '<button type="button" is="paper-icon-button-light" data-resultid="' + id +
+                '" class="btnApproveResult organizerButton autoSize" title="Approve" aria-label="Approve ' +
+                fileName + '"><span class="material-icons check" aria-hidden="true"></span></button>';
+        }
+        if (isEditable(item)) {
+            buttons += '<button type="button" is="paper-icon-button-light" data-resultid="' + id +
+                '" class="btnProcessResult organizerButton autoSize" title="Edit match" aria-label="Edit match for ' +
+                fileName + '"><span class="material-icons edit" aria-hidden="true"></span></button>';
+        }
         buttons += '<button type="button" is="paper-icon-button-light" data-resultid="' + id +
             '" class="btnRejectResult organizerButton autoSize" title="Reject" aria-label="Reject ' +
-            fileName + '"><span class="material-icons close">close</span></button>';
-    } else if (item.Type !== 'Log' && !item.IsInProgress && item.Status !== 'Success') {
+            fileName + '"><span class="material-icons close" aria-hidden="true"></span></button>';
+    } else if (isDeletable(item)) {
+        if (isEditable(item)) {
+            buttons += '<button type="button" is="paper-icon-button-light" data-resultid="' + id +
+                '" class="btnProcessResult organizerButton autoSize" title="Edit match" aria-label="Edit match for ' +
+                fileName + '"><span class="material-icons edit" aria-hidden="true"></span></button>';
+        }
         buttons += '<button type="button" is="paper-icon-button-light" data-resultid="' + id +
             '" class="btnDeleteResult organizerButton autoSize" title="Delete source" aria-label="Delete source ' +
-            fileName + '"><span class="material-icons delete">delete</span></button>';
+            fileName + '"><span class="material-icons delete" aria-hidden="true"></span></button>';
     }
 
     return '<td class="detailTableBodyCell" data-title="Status">' + statusHtml + statusDetails + '</td>' +
@@ -646,9 +663,7 @@ export default function (view) {
 
     view.querySelector('.resultBody').addEventListener('click', handleItemClick);
     view.querySelector('.btnClearLog').addEventListener('click', function () {
-        if (window.confirm('Clear every activity entry? This does not delete any media files.')) {
-            clearLog(view, false);
-        }
+        clearLog(view, false);
     });
     view.querySelector('.btnClearCompleted').addEventListener('click', function () {
         clearLog(view, true);

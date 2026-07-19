@@ -48,7 +48,7 @@ Install the .NET 9 SDK, then run:
 dotnet build AutoOrganize.sln -c Release
 ```
 
-The plugin DLL is generated under `AutoOrganize/bin/Release/net9.0/`.
+The plugin files are generated under `AutoOrganize/bin/Release/net9.0/`.
 
 Run the regression suite with:
 
@@ -60,4 +60,4 @@ See `VALIDATION.md` for the completed release checks and remaining runtime cavea
 
 ## Installation
 
-Create an Auto Organize plugin directory under Jellyfin's plugin data directory, copy `AutoOrganize.dll` into it, and restart Jellyfin. Back up the Jellyfin configuration and media library before first use, then test with copy mode and a small watch folder before enabling moves or overwrites.
+Create an Auto Organize plugin directory under Jellyfin's plugin data directory, copy the contents of `AutoOrganize/bin/Release/net9.0/` into it, and restart Jellyfin. The Lingua subtitle language detector requires `Lingua.dll` and `Lingua/LanguageModels` alongside `AutoOrganize.dll`. Back up the Jellyfin configuration and media library before first use, then test with copy mode and a small watch folder before enabling moves or overwrites.

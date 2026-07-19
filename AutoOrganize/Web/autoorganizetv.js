@@ -318,7 +318,7 @@ export default function (view) {
 
             const select = view.querySelector('#selectSeriesFolder');
             setSelectOptions(select, mediaLocations, mediaLocations.length > 1);
-            select.value = tvOptions.DefaultSeriesLibraryPath || '';
+            select.value = tvOptions.DefaultSeriesLibraryPath || (mediaLocations.length === 1 ? mediaLocations[0].value : '');
         }, onApiFailure);
     }
 

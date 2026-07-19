@@ -157,14 +157,22 @@ public class FileOrganizationService : IFileOrganizationService
 		AutoOrganizeOptions autoOrganizeOptions = _config.GetAutoOrganizeOptions();
 		FileOrganizationResult fileOrganizationResult2 = fileOrganizationResult.Type switch
 		{
-			FileOrganizerType.Episode => await new EpisodeFileOrganizer(this, _fileSystem, _loggerFactory.CreateLogger<EpisodeFileOrganizer>(), _libraryManager, _libraryMonitor, _providerManager, _namingOptions).OrganizeEpisodeFile(fileOrganizationResult.OriginalPath, autoOrganizeOptions.TvOptions, cancellationToken).ConfigureAwait(continueOnCapturedContext: false), 
-			FileOrganizerType.Movie => await new MovieFileOrganizer(this, _fileSystem, _loggerFactory.CreateLogger<MovieFileOrganizer>(), _libraryManager, _libraryMonitor, _providerManager, _namingOptions).OrganizeMovieFile(fileOrganizationResult.OriginalPath, autoOrganizeOptions.MovieOptions, autoOrganizeOptions.MovieOptions.OverwriteExistingFiles, cancellationToken).ConfigureAwait(continueOnCapturedContext: false), 
+			FileOrganizerType.Episode when SafeFileTransfer.IsSubtitleFile(fileOrganizationResult.OriginalPath) => await new SubtitleFileOrganizer(this, _fileSystem, _loggerFactory.CreateLogger<SubtitleFileOrganizer>(), _libraryManager, _libraryMonitor, _namingOptions).ApproveEpisodeSubtitleFile(fileOrganizationResult.OriginalPath, autoOrganizeOptions.TvOptions, cancellationToken).ConfigureAwait(continueOnCapturedContext: false),
+			FileOrganizerType.Episode => await new EpisodeFileOrganizer(this, _fileSystem, _loggerFactory.CreateLogger<EpisodeFileOrganizer>(), _libraryManager, _libraryMonitor, _providerManager, _namingOptions).OrganizeEpisodeFile(fileOrganizationResult.OriginalPath, autoOrganizeOptions.TvOptions, cancellationToken).ConfigureAwait(continueOnCapturedContext: false),
+			FileOrganizerType.Movie when SafeFileTransfer.IsSubtitleFile(fileOrganizationResult.OriginalPath) => await new SubtitleFileOrganizer(this, _fileSystem, _loggerFactory.CreateLogger<SubtitleFileOrganizer>(), _libraryManager, _libraryMonitor, _namingOptions).ApproveMovieSubtitleFile(fileOrganizationResult.OriginalPath, autoOrganizeOptions.MovieOptions, cancellationToken).ConfigureAwait(continueOnCapturedContext: false),
+			FileOrganizerType.Movie => await new MovieFileOrganizer(this, _fileSystem, _loggerFactory.CreateLogger<MovieFileOrganizer>(), _libraryManager, _libraryMonitor, _providerManager, _namingOptions).OrganizeMovieFile(fileOrganizationResult.OriginalPath, autoOrganizeOptions.MovieOptions, autoOrganizeOptions.MovieOptions.OverwriteExistingFiles, cancellationToken).ConfigureAwait(continueOnCapturedContext: false),
 			_ => throw new OrganizationException("No organizer exist for the type " + fileOrganizationResult.Type), 
 		};
 		if (fileOrganizationResult2.Status != FileSortingStatus.Success)
 		{
 			throw new OrganizationException(fileOrganizationResult2.StatusMessage ?? "The media file could not be organized.");
 		}
+		QueueLibraryScanIfNeeded(fileOrganizationResult.Type switch
+		{
+			FileOrganizerType.Episode => autoOrganizeOptions.TvOptions.QueueLibraryScan,
+			FileOrganizerType.Movie => autoOrganizeOptions.MovieOptions.QueueLibraryScan,
+			_ => false
+		});
 	}
 
 	public async Task ClearLog(CancellationToken cancellationToken)
@@ -189,6 +197,7 @@ public class FileOrganizationService : IFileOrganizationService
 		{
 			throw new OrganizationException(fileOrganizationResult.StatusMessage ?? "The episode file could not be organized.");
 		}
+		QueueLibraryScanIfNeeded(autoOrganizeOptions.TvOptions.QueueLibraryScan);
 	}
 
 	public async Task PerformOrganization(MovieFileOrganizationRequest request, CancellationToken cancellationToken)
@@ -201,6 +210,7 @@ public class FileOrganizationService : IFileOrganizationService
 		{
 			throw new OrganizationException(fileOrganizationResult.StatusMessage ?? "The movie file could not be organized.");
 		}
+		QueueLibraryScanIfNeeded(autoOrganizeOptions.MovieOptions.QueueLibraryScan);
 	}
 
 	public QueryResult<SmartMatchResult> GetSmartMatchInfos(FileOrganizationResultQuery query)
@@ -261,6 +271,14 @@ public class FileOrganizationService : IFileOrganizationService
 		if (!PathSafety.IsSafelyWithinAnyRoot(sourcePath, list))
 		{
 			throw new OrganizationException("Source path '" + sourcePath + "' is outside the configured Auto Organize watch folders or traverses a symbolic link.");
+		}
+	}
+
+	private void QueueLibraryScanIfNeeded(bool queueLibraryScan)
+	{
+		if (queueLibraryScan && !_libraryManager.IsScanRunning)
+		{
+			_libraryManager.QueueLibraryScan();
 		}
 	}
 }

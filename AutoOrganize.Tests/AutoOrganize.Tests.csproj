@@ -16,7 +16,6 @@
       The standalone regression runner references the same versions directly
       so `dotnet run` also has them in its local output directory.
     -->
-    <PackageReference Include="Diacritics" Version="4.1.8" />
     <PackageReference Include="Jellyfin.Controller" Version="10.11.11" />
     <PackageReference Include="Jellyfin.Database.Implementations" Version="10.11.11" />
     <PackageReference Include="Jellyfin.Model" Version="10.11.11" />
