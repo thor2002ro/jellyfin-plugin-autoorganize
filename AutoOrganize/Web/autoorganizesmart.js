@@ -65,9 +65,7 @@ function createMatchEntry(infoIndex, matchIndex, matchString) {
     entry.className = 'listItem';
 
     const body = document.createElement('div');
-    body.className = 'listItemBody';
-    body.style.padding = '.1em 1em .4em 5.5em';
-    body.style.minHeight = '1.5em';
+    body.className = 'listItemBody aoMatchEntryBody';
 
     const text = document.createElement('div');
     text.className = 'listItemBodyText secondary';
@@ -78,8 +76,7 @@ function createMatchEntry(infoIndex, matchIndex, matchString) {
     const button = document.createElement('button');
     button.type = 'button';
     button.setAttribute('is', 'emby-button');
-    button.className = 'btnDeleteMatchEntry';
-    button.style.padding = '0';
+    button.className = 'btnDeleteMatchEntry aoMatchDelete';
     button.dataset.index = String(infoIndex);
     button.dataset.matchindex = String(matchIndex);
     button.title = 'Delete';
@@ -107,6 +104,14 @@ function populateList(page, result) {
 
     const container = page.querySelector('.divMatchInfos');
     container.replaceChildren();
+    container.setAttribute('aria-busy', 'false');
+    page.querySelector('.aoError').classList.add('hide');
+
+    const matchCount = infos.reduce(function (total, info) {
+        return total + (Array.isArray(info.MatchStrings) ? info.MatchStrings.length : 0);
+    }, 0);
+    page.querySelector('.aoMatchCount').textContent = matchCount + (matchCount === 1 ? ' saved match' : ' saved matches');
+    page.querySelector('.aoEmpty').classList.toggle('hide', infos.length > 0);
 
     if (infos.length === 0) {
         return;
@@ -147,13 +152,21 @@ function populateList(page, result) {
 
 async function reloadList(page) {
     Loading.show();
+    const container = page.querySelector('.divMatchInfos');
+    const errorState = page.querySelector('.aoError');
+    container.setAttribute('aria-busy', 'true');
+    errorState.classList.add('hide');
+    page.querySelector('.aoEmpty').classList.add('hide');
 
     try {
         const result = await getAllSmartMatchInfos();
         populateList(page, result);
     } catch (error) {
-        Dashboard.processErrorResponse(error);
+        page.querySelector('.aoErrorMessage').textContent =
+            error?.message || 'Check the Jellyfin server connection and try again.';
+        errorState.classList.remove('hide');
     } finally {
+        container.setAttribute('aria-busy', 'false');
         Loading.hide();
     }
 }
@@ -195,18 +208,26 @@ export default function (view) {
             return;
         }
 
-        Loading.show();
-        ApiClient.deleteSmartMatchEntries([
-            {
-                Name: info.Id,
-                Value: matchString
-            }
-        ]).then(function () {
-            return reloadList(view);
-        }, function (error) {
-            Loading.hide();
-            Dashboard.processErrorResponse(error);
+        Dashboard.confirm(
+            'Remove this remembered match? Future files will no longer use it.',
+            'Delete Smart Match'
+        ).then(function () {
+            Loading.show();
+            ApiClient.deleteSmartMatchEntries([
+                {
+                    Name: info.Id,
+                    Value: matchString
+                }
+            ]).then(function () {
+                return reloadList(view);
+            }, function (error) {
+                Loading.hide();
+                Dashboard.processErrorResponse(error);
+            });
         });
+    });
+    view.querySelector('.btnRetrySmart').addEventListener('click', function () {
+        reloadList(view);
     });
 
     view.addEventListener('viewshow', function () {

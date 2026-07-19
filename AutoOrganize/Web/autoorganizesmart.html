@@ -1,10 +1,101 @@
-﻿<div id="libraryFileOrganizerSmartMatchPage" data-role="page" class="page type-interior pluginConfigurationPage withTabs" data-controller="__plugin/AutoOrganizeSmartJs">
-    <div>
-        <div class="content-primary">
+<div id="libraryFileOrganizerSmartMatchPage" data-role="page" class="page type-interior pluginConfigurationPage withTabs autoOrganizePage" data-controller="__plugin/AutoOrganizeSmartJs">
+    <style>
+        #libraryFileOrganizerSmartMatchPage {
+            --ao-radius: .7em;
+            --ao-surface: rgba(128, 128, 128, .08);
+            --ao-surface-strong: rgba(128, 128, 128, .13);
+            --ao-border: rgba(128, 128, 128, .28);
+            --ao-divider: rgba(128, 128, 128, .22);
+        }
+        @supports (background: color-mix(in srgb, currentColor 10%, transparent)) {
+            #libraryFileOrganizerSmartMatchPage {
+                --ao-surface: color-mix(in srgb, currentColor 6%, transparent);
+                --ao-surface-strong: color-mix(in srgb, currentColor 10%, transparent);
+                --ao-border: color-mix(in srgb, currentColor 24%, transparent);
+                --ao-divider: color-mix(in srgb, currentColor 18%, transparent);
+            }
+        }
+        #libraryFileOrganizerSmartMatchPage *,
+        #libraryFileOrganizerSmartMatchPage *::before,
+        #libraryFileOrganizerSmartMatchPage *::after { box-sizing: border-box; }
+        #libraryFileOrganizerSmartMatchPage .content-primary { min-width: 0; }
+        #libraryFileOrganizerSmartMatchPage .aoPageHeader {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: .8em 1em;
+            margin-bottom: 1.2em;
+        }
+        #libraryFileOrganizerSmartMatchPage .aoPageHeader h2 { margin: 0 0 .25em; }
+        #libraryFileOrganizerSmartMatchPage .aoMuted { opacity: .72; }
+        #libraryFileOrganizerSmartMatchPage .aoMetric {
+            padding: .55em .75em;
+            border: 1px solid var(--ao-border);
+            border-radius: 999px;
+            background: var(--ao-surface);
+            font-size: .9em;
+        }
+        #libraryFileOrganizerSmartMatchPage .paperList {
+            overflow: clip;
+            border: 1px solid var(--ao-border);
+            border-radius: var(--ao-radius);
+            background: var(--ao-surface);
+        }
+        #libraryFileOrganizerSmartMatchPage .paperList .listItem { border-bottom: 1px solid var(--ao-divider); }
+        #libraryFileOrganizerSmartMatchPage .paperList .listItem:last-child { border-bottom: 0; }
+        #libraryFileOrganizerSmartMatchPage .aoMatchEntryBody { min-height: 1.5em; padding: .35em 1em .55em 5.5em; }
+        #libraryFileOrganizerSmartMatchPage .aoMatchDelete { padding: 0; }
+        #libraryFileOrganizerSmartMatchPage .aoEmpty,
+        #libraryFileOrganizerSmartMatchPage .aoError {
+            padding: 2em 1.2em;
+            border: 1px solid var(--ao-border);
+            border-radius: var(--ao-radius);
+            background: var(--ao-surface);
+            text-align: center;
+        }
+        #libraryFileOrganizerSmartMatchPage .aoEmpty .material-icons,
+        #libraryFileOrganizerSmartMatchPage .aoError > .material-icons { display: block; margin-bottom: .2em; font-size: 2.4em; opacity: .65; }
+        #libraryFileOrganizerSmartMatchPage .aoError {
+            border-inline-start: .25em solid rgba(205, 55, 55, .75);
+            background: rgba(205, 55, 55, .08);
+        }
+        #libraryFileOrganizerSmartMatchPage .aoError .raised { margin: .9em 0 0; }
+        #libraryFileOrganizerSmartMatchPage button:focus-visible {
+            outline: 2px solid currentColor;
+            outline-offset: 2px;
+        }
+        @media (max-width: 600px) {
+            #libraryFileOrganizerSmartMatchPage .aoPageHeader { align-items: stretch; }
+            #libraryFileOrganizerSmartMatchPage .aoMetric { width: fit-content; }
+            #libraryFileOrganizerSmartMatchPage .aoMatchEntryBody { padding-inline-start: 1em; }
+        }
+    </style>
 
-            <div class="readOnlyContent padded-top">
-                <p>Smart Matches</p>
-                <div class="divMatchInfos"></div>
+    <div data-role="content">
+        <div class="content-primary">
+            <div class="aoPageHeader">
+                <div>
+                    <h2>Smart matches</h2>
+                    <div class="aoMuted">Manage remembered filename matches used to identify future movies and episodes.</div>
+                </div>
+                <div class="aoMetric aoMatchCount" aria-live="polite">Loading matches…</div>
+            </div>
+
+            <div class="divMatchInfos" aria-busy="true"></div>
+            <div class="aoEmpty hide" role="status">
+                <span class="material-icons auto_awesome" aria-hidden="true"></span>
+                <strong>No smart matches saved</strong>
+                <div class="aoMuted">Corrections you choose to remember will appear here.</div>
+            </div>
+            <div class="aoError hide" role="alert">
+                <span class="material-icons error_outline" aria-hidden="true"></span>
+                <strong>Smart matches could not be loaded</strong>
+                <div class="aoMuted aoErrorMessage"></div>
+                <button is="emby-button" type="button" class="btnRetrySmart raised">
+                    <span class="material-icons refresh" aria-hidden="true"></span>
+                    <span>Try again</span>
+                </button>
             </div>
         </div>
     </div>

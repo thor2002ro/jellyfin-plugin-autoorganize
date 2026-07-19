@@ -1,258 +1,319 @@
-<div id="libraryFileOrganizerTvPage" data-role="page" class="page type-interior pluginConfigurationPage withTabs" data-controller="__plugin/AutoOrganizeTvJs">
-    <div>
+<div id="libraryFileOrganizerTvPage" data-role="page" class="page type-interior pluginConfigurationPage withTabs autoOrganizePage" data-controller="__plugin/AutoOrganizeTvJs">
+    <style>
+        #libraryFileOrganizerTvPage {
+            --ao-radius: .7em;
+            --ao-radius-small: .48em;
+            --ao-surface: rgba(128, 128, 128, .08);
+            --ao-surface-strong: rgba(128, 128, 128, .13);
+            --ao-border: rgba(128, 128, 128, .28);
+            --ao-divider: rgba(128, 128, 128, .22);
+        }
+        @supports (background: color-mix(in srgb, currentColor 10%, transparent)) {
+            #libraryFileOrganizerTvPage {
+                --ao-surface: color-mix(in srgb, currentColor 6%, transparent);
+                --ao-surface-strong: color-mix(in srgb, currentColor 10%, transparent);
+                --ao-border: color-mix(in srgb, currentColor 24%, transparent);
+                --ao-divider: color-mix(in srgb, currentColor 18%, transparent);
+            }
+        }
+        #libraryFileOrganizerTvPage *,
+        #libraryFileOrganizerTvPage *::before,
+        #libraryFileOrganizerTvPage *::after { box-sizing: border-box; }
+        #libraryFileOrganizerTvPage .content-primary,
+        #libraryFileOrganizerTvPage .libraryFileOrganizerForm { min-width: 0; }
+        #libraryFileOrganizerTvPage .aoPageHeader { margin-bottom: 1.4em; }
+        #libraryFileOrganizerTvPage .aoPageHeader h2 { margin-bottom: .25em; }
+        #libraryFileOrganizerTvPage .aoMuted { opacity: .72; }
+        #libraryFileOrganizerTvPage .libraryFileOrganizerForm { margin-top: 1em; }
+        #libraryFileOrganizerTvPage .aoSection {
+            margin: 0 0 1em;
+            border: 1px solid var(--ao-border);
+            border-radius: var(--ao-radius);
+            background: var(--ao-surface);
+            overflow: clip;
+        }
+        #libraryFileOrganizerTvPage .aoSection > summary,
+        #libraryFileOrganizerTvPage .aoSubsection > summary {
+            cursor: pointer;
+            overflow-wrap: anywhere;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+        #libraryFileOrganizerTvPage .aoSection > summary {
+            padding: 1em 1.1em;
+            font-size: 1.08em;
+            font-weight: 600;
+            background: var(--ao-surface-strong);
+        }
+        #libraryFileOrganizerTvPage .aoSection > summary:hover,
+        #libraryFileOrganizerTvPage .aoSubsection > summary:hover { filter: brightness(1.08); }
+        #libraryFileOrganizerTvPage .aoSection > summary:focus-visible,
+        #libraryFileOrganizerTvPage .aoSubsection > summary:focus-visible,
+        #libraryFileOrganizerTvPage button:focus-visible {
+            outline: 2px solid currentColor;
+            outline-offset: 2px;
+        }
+        #libraryFileOrganizerTvPage .aoSectionBody { padding: 1em 1.1em 1.1em; }
+        #libraryFileOrganizerTvPage .aoGrid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr));
+            gap: 1em;
+            min-width: 0;
+        }
+        #libraryFileOrganizerTvPage .aoGrid > * { min-width: 0; margin: 0; }
+        #libraryFileOrganizerTvPage .aoSpanAll { grid-column: 1 / -1; }
+        #libraryFileOrganizerTvPage .aoPathField {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: .45em;
+            align-items: center;
+        }
+        #libraryFileOrganizerTvPage .aoSubsection {
+            margin-top: 1em;
+            border-top: 1px solid var(--ao-divider);
+            padding-top: .2em;
+        }
+        #libraryFileOrganizerTvPage .aoSubsection > summary { padding: .8em 0; font-weight: 600; }
+        #libraryFileOrganizerTvPage .aoSubsectionBody { padding: .25em 0 .2em; }
+        #libraryFileOrganizerTvPage .aoTableWrap {
+            max-width: 100%;
+            overflow-x: auto;
+            overscroll-behavior-inline: contain;
+            -webkit-overflow-scrolling: touch;
+            margin-top: .7em;
+            border: 1px solid var(--ao-border);
+            border-radius: var(--ao-radius-small);
+        }
+        #libraryFileOrganizerTvPage .aoTable {
+            width: 100%;
+            min-width: 520px;
+            border-collapse: collapse;
+            font-size: .92em;
+        }
+        #libraryFileOrganizerTvPage .aoTable th,
+        #libraryFileOrganizerTvPage .aoTable td {
+            padding: .55em .62em;
+            border-bottom: 1px solid var(--ao-divider);
+            text-align: left;
+        }
+        #libraryFileOrganizerTvPage .aoTable th { background: var(--ao-surface-strong); font-weight: 600; }
+        #libraryFileOrganizerTvPage .aoTable tbody tr:last-child td { border-bottom: 0; }
+        #libraryFileOrganizerTvPage .aoWarning {
+            padding: .8em;
+            border-inline-start: .25em solid rgba(215, 135, 28, .75);
+            border-radius: var(--ao-radius-small);
+            background: rgba(215, 135, 28, .08);
+        }
+        #libraryFileOrganizerTvPage .aoDependent { transition: opacity .2s ease; }
+        #libraryFileOrganizerTvPage .aoDependentDisabled { opacity: .48; }
+        #libraryFileOrganizerTvPage .aoActions { display: flex; justify-content: flex-end; margin-top: 1em; }
+        #libraryFileOrganizerTvPage .aoActions .button-submit { min-width: min(100%, 12em); }
+        #libraryFileOrganizerTvPage .aoActions button { transition: transform .15s ease, opacity .15s ease; }
+        #libraryFileOrganizerTvPage .aoActions button:active:not(:disabled) { transform: scale(.98); }
+        #libraryFileOrganizerTvPage [aria-busy="true"] { cursor: progress; }
+        @media (max-width: 600px) {
+            #libraryFileOrganizerTvPage .aoSectionBody { padding: .82em; }
+            #libraryFileOrganizerTvPage .aoSection > summary { padding: .9em .82em; }
+            #libraryFileOrganizerTvPage .aoActions,
+            #libraryFileOrganizerTvPage .aoActions .button-submit { width: 100%; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #libraryFileOrganizerTvPage .aoDependent,
+            #libraryFileOrganizerTvPage .aoActions button { transition: none; }
+        }
+    </style>
+
+    <div data-role="content">
         <div class="content-primary">
+            <div class="aoPageHeader">
+                <h2>TV episodes</h2>
+                <div class="aoMuted">Watch incoming episode files, choose their naming rules, and keep your TV libraries organized automatically.</div>
+            </div>
 
-            <form class="libraryFileOrganizerForm padded-top">
-
-                <div>
-                    <label class="checkboxContainer">
-                        <input type="checkbox" is="emby-checkbox" id="chkEnableTvSorting" />
-                        <span>Enable auto-organize for episodes</span>
-                    </label>
-                </div>
-                <div class="inputContainer">
-                    <div style="display:flex; align-items:center;">
-                        <div style="flex-grow:1;">
-                            <input is="emby-input" id="txtWatchFolder" type="text" label="Watch folder:" />
-                            <div class="fieldDescription">This folder will be monitored for new episodes.</div>
+            <form class="libraryFileOrganizerForm">
+                <details class="aoSection" open>
+                    <summary>Watch folder and transfer</summary>
+                    <div class="aoSectionBody aoGrid">
+                        <div class="checkboxContainer checkboxContainer-withDescription aoSpanAll">
+                            <label>
+                                <input type="checkbox" is="emby-checkbox" id="chkEnableTvSorting" />
+                                <span>Enable auto-organize for episodes</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">Monitor the watch folder and organize new episode files automatically.</div>
                         </div>
-                        <button type="button" is="paper-icon-button-light" id="btnSelectWatchFolder" title="Select directory" class="autoSize">
-                            <span class="material-icons search"></span>
-                        </button>
+                        <div class="aoDependent aoGrid aoSpanAll">
+                            <div class="inputContainer aoSpanAll">
+                                <div class="aoPathField">
+                                    <div>
+                                        <input is="emby-input" id="txtWatchFolder" type="text" label="Watch folder" />
+                                        <div class="fieldDescription">This folder will be monitored for new episodes.</div>
+                                    </div>
+                                    <button type="button" is="paper-icon-button-light" id="btnSelectWatchFolder" title="Select watch folder" aria-label="Select watch folder" class="autoSize">
+                                        <span class="material-icons search"></span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="inputContainer">
+                                <input is="emby-input" id="txtMinFileSize" type="number" label="Minimum file size (MB)" pattern="[0-9]*" min="0" required />
+                                <div class="fieldDescription">Files smaller than this will be ignored.</div>
+                            </div>
+                            <div class="selectContainer">
+                                <select is="emby-select" id="copyOrMoveFile" label="Transfer method">
+                                    <option value="true">Copy</option>
+                                    <option value="false">Move</option>
+                                </select>
+                                <div class="fieldDescription editorfieldDescription">Choose how files leave the watch folder.</div>
+                            </div>
+                            <div class="checkboxContainer checkboxContainer-withDescription aoSpanAll">
+                                <label>
+                                    <input type="checkbox" is="emby-checkbox" id="chkOverwriteExistingEpisodes" />
+                                    <span>Overwrite existing episodes</span>
+                                </label>
+                                <div class="fieldDescription checkboxFieldDescription">Replace a destination file when the generated path already exists.</div>
+                            </div>
+                        </div>
                     </div>
-                </div>
-                <div class="inputContainer">
-                    <input is="emby-input" id="txtMinFileSize" type="number" label="Min file size:" pattern="[0-9]*" min="0" required />
-                    <div class="fieldDescription">Files smaller than this will be ignored.</div>
-                </div>
-                <div class="inputContainer">
-                    <input is="emby-input" id="txtSeasonFolderPattern" type="text" label="Season folder pattern:" required />
-                    <div class="fieldDescription seasonFolderFieldDescription"></div>
-                </div>
-                <div class="inputContainer">
-                    <input is="emby-input" id="txtSeasonZeroName" type="text" label="Season zero folder name:" required />
-                    <div class="fieldDescription"></div>
-                </div>
-                <div class="checkboxContainer checkboxContainer-withDescription">
-                    <label>
-                        <input type="checkbox" is="emby-checkbox" id="chkAlwaysCreateSeasonFolders" />
-                        <span>Always place episodes in season folders</span>
-                    </label>
-                    <div class="fieldDescription checkboxFieldDescription">Create the configured season directory even when an existing series currently stores episodes directly in its root.</div>
-                </div>
+                </details>
 
-                <div is="emby-collapse" title="Series directory pattern">
-                    <div class="collapseContent">
-                        <br />
-                        <div class="inputContainer">
-                            <input is="emby-input" id="txtSeriesPattern" type="text" label="Series pattern:" required />
-                            <div class="fieldDescription seriesPatternDescription"></div>
+                <details class="aoSection aoDependent" open>
+                    <summary>Folders and naming</summary>
+                    <div class="aoSectionBody">
+                        <div class="aoGrid">
+                            <div class="inputContainer">
+                                <input is="emby-input" id="txtSeasonFolderPattern" type="text" label="Season folder pattern" required />
+                                <div class="fieldDescription seasonFolderFieldDescription"></div>
+                            </div>
+                            <div class="inputContainer">
+                                <input is="emby-input" id="txtSeasonZeroName" type="text" label="Season zero folder name" required />
+                                <div class="fieldDescription">Used for specials and other season-zero episodes.</div>
+                            </div>
+                            <div class="checkboxContainer checkboxContainer-withDescription aoSpanAll">
+                                <label>
+                                    <input type="checkbox" is="emby-checkbox" id="chkAlwaysCreateSeasonFolders" />
+                                    <span>Always place episodes in season folders</span>
+                                </label>
+                                <div class="fieldDescription checkboxFieldDescription">Create the configured season directory even when an existing series currently stores episodes directly in its root.</div>
+                            </div>
                         </div>
 
-                        <br />
-                        <p>Supported Patterns</p>
+                        <details class="aoSubsection">
+                            <summary>Series directory pattern</summary>
+                            <div class="aoSubsectionBody">
+                                <div class="inputContainer">
+                                    <input is="emby-input" id="txtSeriesPattern" type="text" label="Series pattern" required />
+                                    <div class="fieldDescription seriesPatternDescription"></div>
+                                </div>
+                                <div class="aoTableWrap" tabindex="0" role="region" aria-label="Supported series directory patterns">
+                                    <table id="series-table" class="aoTable">
+                                        <thead><tr><th scope="col">Term</th><th scope="col">Pattern</th><th scope="col">Result</th></tr></thead>
+                                        <tbody>
+                                            <tr><td>Series name</td><td><code>%sn</code></td><td>Series name</td></tr>
+                                            <tr><td>Series name</td><td><code>%s.n</code></td><td>Series.name</td></tr>
+                                            <tr><td>Series name</td><td><code>%s_n</code></td><td>Series_name</td></tr>
+                                            <tr><td>Series year</td><td><code>%sy</code></td><td>2017</td></tr>
+                                            <tr><td>Original directory path</td><td><code>%fn</code></td><td>Series name (2017)</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </details>
 
-                        <table id="series-table" class="ui-responsive">
-                            <thead>
-                                <tr>
-                                    <th>Term</th>
-                                    <th>Pattern</th>
-                                    <th>Result</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>Series name</td>
-                                    <td>%sn</td>
-                                    <td>Series name</td>
-                                </tr>
-                                <tr>
-                                    <td>Series name</td>
-                                    <td>%s.n</td>
-                                    <td>Series.name</td>
-                                </tr>
-                                <tr>
-                                    <td>Series name</td>
-                                    <td>%s_n</td>
-                                    <td>Series_name</td>
-                                </tr>
-                                <tr>
-                                    <td>Series year</td>
-                                    <td>%sy</td>
-                                    <td>2017</td>
-                                </tr>
-                                <tr>
-                                    <td>Original Directory Path</td>
-                                    <td>%fn</td>
-                                    <td>Series name (2017)</td>
-                                </tr>
-                            </tbody>
-                        </table>
+                        <details class="aoSubsection">
+                            <summary>Episode file pattern</summary>
+                            <div class="aoSubsectionBody">
+                                <div class="checkboxContainer checkboxContainer-withDescription">
+                                    <label>
+                                        <input type="checkbox" is="emby-checkbox" id="chkPreserveEpisodeFilename" />
+                                        <span>Preserve original episode filename</span>
+                                    </label>
+                                    <div class="fieldDescription checkboxFieldDescription">Keep the incoming media filename and extension. The stored episode patterns remain available when this option is disabled.</div>
+                                </div>
+                                <div class="aoGrid">
+                                    <div class="inputContainer">
+                                        <input is="emby-input" id="txtEpisodePattern" type="text" label="Episode pattern" required />
+                                        <div class="fieldDescription episodePatternDescription"></div>
+                                    </div>
+                                    <div class="inputContainer">
+                                        <input is="emby-input" id="txtMultiEpisodePattern" type="text" label="Multi-episode pattern" required />
+                                        <div class="fieldDescription multiEpisodePatternDescription"></div>
+                                    </div>
+                                </div>
+                                <div class="aoTableWrap" tabindex="0" role="region" aria-label="Supported episode file patterns">
+                                    <table id="episode-table" class="aoTable">
+                                        <thead><tr><th scope="col">Term</th><th scope="col">Pattern</th><th scope="col">Result</th></tr></thead>
+                                        <tbody>
+                                            <tr><td>Series name</td><td><code>%sn</code></td><td>Series name</td></tr>
+                                            <tr><td>Series name</td><td><code>%s.n</code></td><td>Series.name</td></tr>
+                                            <tr><td>Series name</td><td><code>%s_n</code></td><td>Series_name</td></tr>
+                                            <tr><td>Season number</td><td><code>%s</code> / <code>%0s</code></td><td>1 / 01</td></tr>
+                                            <tr><td>Episode number</td><td><code>%e</code> / <code>%0e</code></td><td>4 / 04</td></tr>
+                                            <tr><td>Ending episode number</td><td><code>%ed</code> / <code>%0ed</code></td><td>5 / 05</td></tr>
+                                            <tr><td>Episode name</td><td><code>%en</code></td><td>Episode name</td></tr>
+                                            <tr><td>Episode name</td><td><code>%e.n</code></td><td>Episode.name</td></tr>
+                                            <tr><td>Episode name</td><td><code>%e_n</code></td><td>Episode_name</td></tr>
+                                            <tr><td>File extension</td><td><code>%ext</code></td><td>mkv</td></tr>
+                                            <tr><td>Original file name</td><td><code>%fn</code></td><td>filename</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </details>
                     </div>
-                </div>
+                </details>
 
-                <div is="emby-collapse" title="Episode file pattern">
-                    <div class="collapseContent">
-                        <br />
+                <details class="aoSection aoDependent" open>
+                    <summary>Cleanup and library updates</summary>
+                    <div class="aoSectionBody aoGrid">
+                        <div class="inputContainer aoSpanAll">
+                            <input is="emby-input" id="txtDeleteLeftOverFiles" type="text" label="Delete leftover files" />
+                            <div class="fieldDescription">Enter file extensions separated by semicolons (;).</div>
+                        </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label>
-                                <input type="checkbox" is="emby-checkbox" id="chkPreserveEpisodeFilename" />
-                                <span>Preserve original episode filename</span>
+                                <input type="checkbox" is="emby-checkbox" id="chkDeleteEmptyFolders" />
+                                <span>Delete empty folders</span>
                             </label>
-                            <div class="fieldDescription checkboxFieldDescription">Keep the incoming media filename and extension. The stored episode patterns remain available when this option is disabled.</div>
+                            <div class="fieldDescription checkboxFieldDescription">Remove empty source folders after organization.</div>
                         </div>
-                        <div class="inputContainer">
-                            <input is="emby-input" id="txtEpisodePattern" type="text" label="Episode pattern:" required />
-                            <div class="fieldDescription episodePatternDescription"></div>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label>
+                                <input type="checkbox" is="emby-checkbox" id="chkExtendedClean" />
+                                <span>Extended clean</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">Also clean configured leftover files and empty folders.</div>
                         </div>
-                        <div class="inputContainer">
-                            <input is="emby-input" id="txtMultiEpisodePattern" type="text" label="Multi-episode pattern:" required />
-                            <div class="fieldDescription multiEpisodePatternDescription"></div>
+                        <div class="checkboxContainer checkboxContainer-withDescription aoSpanAll">
+                            <label>
+                                <input type="checkbox" is="emby-checkbox" id="chkQueueLibScan" />
+                                <span>Queue library scan on completion</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">When enabled for both movies and TV shows, one library scan is queued after all organization work completes.</div>
                         </div>
-
-                        <br />
-                        <p>Supported Patterns</p>
-
-                        <table id="episode-table" class="ui-responsive">
-                            <thead>
-                                <tr>
-                                    <th>Term</th>
-                                    <th>Pattern</th>
-                                    <th>Result</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>Series name</td>
-                                    <td>%sn</td>
-                                    <td>Series name</td>
-                                </tr>
-                                <tr>
-                                    <td>Series name</td>
-                                    <td>%s.n</td>
-                                    <td>Series.name</td>
-                                </tr>
-                                <tr>
-                                    <td>Series name</td>
-                                    <td>%s_n</td>
-                                    <td>Series_name</td>
-                                </tr>
-                                <tr>
-                                    <td>Season number</td>
-                                    <td>%s</td>
-                                    <td>1</td>
-                                </tr>
-                                <tr>
-                                    <td>Season number</td>
-                                    <td>%0s</td>
-                                    <td>01</td>
-                                </tr>
-                                <tr>
-                                    <td>Episode number</td>
-                                    <td>%e</td>
-                                    <td>4</td>
-                                </tr>
-                                <tr>
-                                    <td>Episode number</td>
-                                    <td>%0e</td>
-                                    <td>04</td>
-                                </tr>
-                                <tr>
-                                    <td>Ending episode number</td>
-                                    <td>%ed</td>
-                                    <td>5</td>
-                                </tr>
-                                <tr>
-                                    <td>Ending episode number</td>
-                                    <td>%0ed</td>
-                                    <td>05</td>
-                                </tr>
-                                <tr>
-                                    <td>Episode name</td>
-                                    <td>%en</td>
-                                    <td>Episode name</td>
-                                </tr>
-                                <tr>
-                                    <td>Episode name</td>
-                                    <td>%e.n</td>
-                                    <td>Episode.name</td>
-                                </tr>
-                                <tr>
-                                    <td>Episode name</td>
-                                    <td>%e_n</td>
-                                    <td>Episode_name</td>
-                                </tr>
-                                <tr>
-                                    <td>File extension</td>
-                                    <td>%ext</td>
-                                    <td>mkv</td>
-                                </tr>
-                                <tr>
-                                    <td>Original File Name</td>
-                                    <td>%fn</td>
-                                    <td>filename</td>
-                                </tr>
-                            </tbody>
-                        </table>
                     </div>
-                </div>
+                </details>
 
-                <br /><br />
-                <div class="selectContainer">
-                    <select is="emby-select" id="copyOrMoveFile" label="Transfer method:">
-                        <option value="true">Copy</option>
-                        <option value="false">Move</option>
-                    </select>
-                    <div class="fieldDescription editorfieldDescription">Copy or move files from the watch folder</div>
-                </div>
-                <div>
-                    <label class="checkboxContainer">
-                        <input type="checkbox" is="emby-checkbox" id="chkOverwriteExistingEpisodes" />
-                        <span>Overwrite existing episodes</span>
-                    </label>
-                </div>
-                <div class="inputContainer">
-                    <input is="emby-input" id="txtDeleteLeftOverFiles" type="text" label="Delete left over files" />
-                    <div class="fieldDescription">Provide a list of file extensions to delete, separated by semicolons (;)</div>
-                </div>
-                <div class="checkboxContainer checkboxContainer-withDescription">
-                    <label>
-                        <input type="checkbox" is="emby-checkbox" id="chkDeleteEmptyFolders" />
-                        <span>Delete empty folders</span>
-                    </label>
-                    <div class="fieldDescription checkboxFieldDescription">Empty folders will be deleted</div>
-                </div>
-                <div class="checkboxContainer checkboxContainer-withDescription">
-                    <label>
-                        <input type="checkbox" is="emby-checkbox" id="chkExtendedClean" />
-                        <span>Extended Clean</span>
-                    </label>
-                    <div class="fieldDescription checkboxFieldDescription">Extended clean of left over files and empty folders</div>
-                </div>
-                <div class="checkboxContainer checkboxContainer-withDescription">
-                    <label>
-                        <input type="checkbox" is="emby-checkbox" id="chkQueueLibScan" />
-                        <span>Queue library scan on completion</span>
-                    </label>
-                    <div class="fieldDescription checkboxFieldDescription">Queue a library scan on completion, when enabled for both movies and TV shows, the library scan is triggered once</div>
-                </div>
-                <div class="checkboxContainer checkboxContainer-withDescription">
-                    <label>
-                        <input type="checkbox" is="emby-checkbox" id="chkEnableSeriesAutoDetect" />
-                        <span>Enable auto-detect for Series</span>
-                    </label>
-                    <div class="fieldDescription checkboxFieldDescription">Warning Beta feature, Use with caution, this may cause significantly longer scans and false identification</div>
-                </div>
-                <div class="fldSelectSeriesFolder hide selectContainer">
-                    <select id="selectSeriesFolder" is="emby-select" label="Default Series library:"></select>
-                </div>
-                <div>
+                <details class="aoSection aoDependent">
+                    <summary>Automatic matching</summary>
+                    <div class="aoSectionBody">
+                        <div class="checkboxContainer checkboxContainer-withDescription aoWarning">
+                            <label>
+                                <input type="checkbox" is="emby-checkbox" id="chkEnableSeriesAutoDetect" />
+                                <span>Enable automatic series detection</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">Beta feature. Detection can make scans significantly slower and may identify files incorrectly.</div>
+                        </div>
+                        <div class="fldSelectSeriesFolder hide selectContainer">
+                            <select id="selectSeriesFolder" is="emby-select" label="Default TV library"></select>
+                        </div>
+                    </div>
+                </details>
+
+                <div class="aoActions">
                     <button is="emby-button" type="submit" class="raised button-submit block">
-                        <span>Save</span>
+                        <span class="aoSaveLabel" aria-live="polite">Save changes</span>
                     </button>
                 </div>
             </form>
-
         </div>
     </div>
 </div>

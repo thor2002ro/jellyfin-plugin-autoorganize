@@ -79,8 +79,20 @@ function loadPage(view, config) {
     view.querySelector('#chkQueueLibScan').checked = Boolean(movieOptions.QueueLibraryScan);
 }
 
-function onSubmit(view) {
-    ApiClient.getNamedConfiguration('autoorganize').then(function (config) {
+async function onSubmit(view) {
+    const button = view.querySelector('.libraryFileOrganizerForm button[type="submit"]');
+    const label = button.querySelector('.aoSaveLabel');
+
+    if (button.disabled) {
+        return false;
+    }
+
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    label.textContent = 'Saving…';
+
+    try {
+        const config = await ApiClient.getNamedConfiguration('autoorganize');
         const movieOptions = config.MovieOptions || {};
         const minFileSize = Number.parseInt(view.querySelector('#txtMovieMinFileSize').value, 10);
 
@@ -103,8 +115,15 @@ function onSubmit(view) {
         movieOptions.CopyOriginalFile = view.querySelector('#copyOrMoveMovieFile').value === 'true';
         movieOptions.QueueLibraryScan = view.querySelector('#chkQueueLibScan').checked;
 
-        return ApiClient.updateNamedConfiguration('autoorganize', config);
-    }).then(Dashboard.processServerConfigurationUpdateResult, Dashboard.processErrorResponse);
+        const result = await ApiClient.updateNamedConfiguration('autoorganize', config);
+        Dashboard.processServerConfigurationUpdateResult(result);
+    } catch (error) {
+        Dashboard.processErrorResponse(error);
+    } finally {
+        button.disabled = false;
+        button.setAttribute('aria-busy', 'false');
+        label.textContent = 'Save changes';
+    }
 
     return false;
 }
@@ -192,6 +211,25 @@ export default function (view) {
         }
     }
 
+    function updateOrganizerState() {
+        const enabled = view.querySelector('#chkEnableMovieSorting').checked;
+        const form = view.querySelector('.libraryFileOrganizerForm');
+
+        form.querySelectorAll('input, select, button').forEach(function (control) {
+            if (control.id !== 'chkEnableMovieSorting' && control.type !== 'submit') {
+                control.disabled = !enabled;
+            }
+        });
+        view.querySelectorAll('.aoDependent').forEach(function (section) {
+            section.classList.toggle('aoDependentDisabled', !enabled);
+        });
+
+        if (enabled) {
+            toggleMoviePattern();
+            toggleMovieLocation();
+        }
+    }
+
     function populateMovieLocation(config) {
         const movieOptions = config.MovieOptions || {};
 
@@ -223,6 +261,7 @@ export default function (view) {
     view.querySelector('#chkSubMovieFolders').addEventListener('change', toggleMovieFolderPattern);
     view.querySelector('#txtMovieFolderPattern').addEventListener('input', updateMovieFolderPatternHelp);
     view.querySelector('#chkEnableMovieAutoDetect').addEventListener('change', toggleMovieLocation);
+    view.querySelector('#chkEnableMovieSorting').addEventListener('change', updateOrganizerState);
 
     view.querySelector('.libraryFileOrganizerForm').addEventListener('submit', function (event) {
         event.preventDefault();
@@ -240,6 +279,7 @@ export default function (view) {
             populateMovieLocation(config);
             toggleMovieLocation();
             toggleMovieFolderPattern();
+            updateOrganizerState();
         }, onApiFailure);
     });
 }

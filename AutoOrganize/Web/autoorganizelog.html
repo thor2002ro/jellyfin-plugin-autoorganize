@@ -1,52 +1,282 @@
-﻿<div id="libraryFileOrganizerLogPage" data-role="page" class="page type-interior libraryFileOrganizerLogPage pluginConfigurationPage withTabs fullWidthContent" data-controller="__plugin/AutoOrganizeLogJs">
+<div id="libraryFileOrganizerLogPage" data-role="page" class="page type-interior libraryFileOrganizerLogPage pluginConfigurationPage withTabs fullWidthContent autoOrganizePage" data-controller="__plugin/AutoOrganizeLogJs">
+    <style>
+        #libraryFileOrganizerLogPage {
+            --ao-radius: .7em;
+            --ao-radius-small: .48em;
+            --ao-surface: rgba(128, 128, 128, .08);
+            --ao-surface-strong: rgba(128, 128, 128, .13);
+            --ao-border: rgba(128, 128, 128, .28);
+            --ao-divider: rgba(128, 128, 128, .22);
+        }
+        @supports (background: color-mix(in srgb, currentColor 10%, transparent)) {
+            #libraryFileOrganizerLogPage {
+                --ao-surface: color-mix(in srgb, currentColor 6%, transparent);
+                --ao-surface-strong: color-mix(in srgb, currentColor 10%, transparent);
+                --ao-border: color-mix(in srgb, currentColor 24%, transparent);
+                --ao-divider: color-mix(in srgb, currentColor 18%, transparent);
+            }
+        }
+        #libraryFileOrganizerLogPage *,
+        #libraryFileOrganizerLogPage *::before,
+        #libraryFileOrganizerLogPage *::after { box-sizing: border-box; }
+        #libraryFileOrganizerLogPage .content-primary { min-width: 0; }
+        #libraryFileOrganizerLogPage .aoPageHeader {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: .8em 1em;
+            margin-bottom: 1.2em;
+        }
+        #libraryFileOrganizerLogPage .aoPageHeader h2 { margin: 0 0 .25em; }
+        #libraryFileOrganizerLogPage .aoMuted { opacity: .72; }
+        #libraryFileOrganizerLogPage .aoHeaderActions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: flex-end;
+            gap: .6em;
+        }
+        #libraryFileOrganizerLogPage .aoHeaderActions .raised { margin: 0; }
+        #libraryFileOrganizerLogPage .aoLogSummary {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: .55em;
+            margin-bottom: 1em;
+        }
+        #libraryFileOrganizerLogPage .aoMetric {
+            min-width: 0;
+            padding: .68em .75em;
+            border: 1px solid var(--ao-border);
+            border-radius: var(--ao-radius-small);
+            background: var(--ao-surface);
+        }
+        #libraryFileOrganizerLogPage .aoMetricLabel { display: block; font-size: .78em; opacity: .72; }
+        #libraryFileOrganizerLogPage .aoMetricValue { display: block; margin-top: .1em; font-size: 1.08em; font-weight: 600; }
+        #libraryFileOrganizerLogPage .organizeTaskPanel {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: .6em;
+            margin-bottom: 1em;
+            padding: .8em;
+            border: 1px solid var(--ao-border);
+            border-radius: var(--ao-radius);
+            background: var(--ao-surface);
+        }
+        #libraryFileOrganizerLogPage .organizeTaskPanel.hide { display: none; }
+        #libraryFileOrganizerLogPage .organizeTaskPanel .raised { margin: 0; }
+        #libraryFileOrganizerLogPage .organizeProgress { flex: 1 1 12em; min-width: 10em; height: .45em; }
+        #libraryFileOrganizerLogPage .aoTableWrap {
+            max-width: 100%;
+            overflow-x: auto;
+            overscroll-behavior-inline: contain;
+            -webkit-overflow-scrolling: touch;
+            border: 1px solid var(--ao-border);
+            border-radius: var(--ao-radius);
+            background: var(--ao-surface);
+        }
+        #libraryFileOrganizerLogPage .tblOrganizationResults {
+            width: 100%;
+            min-width: 820px;
+            border-collapse: collapse;
+        }
+        #libraryFileOrganizerLogPage .tblOrganizationResults th {
+            background: var(--ao-surface-strong);
+            font-weight: 600;
+        }
+        #libraryFileOrganizerLogPage .tblOrganizationResults th,
+        #libraryFileOrganizerLogPage .tblOrganizationResults td {
+            padding: .7em .75em;
+            border-bottom: 1px solid var(--ao-divider);
+            text-align: left;
+        }
+        #libraryFileOrganizerLogPage .tblOrganizationResults tbody tr:last-child td { border-bottom: 0; }
+        #libraryFileOrganizerLogPage .fileCell {
+            max-width: 30em;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+        #libraryFileOrganizerLogPage .aoStatusBadge {
+            display: inline-flex;
+            align-items: center;
+            gap: .4em;
+            min-height: 1.8em;
+            padding: .18em .58em;
+            border: 1px solid var(--ao-border);
+            border-radius: 999px;
+            background: var(--ao-surface-strong);
+            color: inherit;
+            font-size: .82em;
+            line-height: 1.2;
+        }
+        #libraryFileOrganizerLogPage button.aoStatusBadge { margin: 0; cursor: pointer; }
+        #libraryFileOrganizerLogPage .aoStatusBadge::before {
+            content: "";
+            width: .62em;
+            height: .62em;
+            flex: 0 0 .62em;
+            border-radius: 999px;
+            background: currentColor;
+        }
+        #libraryFileOrganizerLogPage .aoSuccess { color: #4caf50; background: rgba(76, 175, 80, .1); }
+        #libraryFileOrganizerLogPage .aoFailure { color: #e35b5b; background: rgba(227, 91, 91, .1); }
+        #libraryFileOrganizerLogPage .aoSkipped { color: #5d8fd8; background: rgba(93, 143, 216, .1); }
+        #libraryFileOrganizerLogPage .aoProgress { color: #d78b2d; background: rgba(215, 139, 45, .1); }
+        #libraryFileOrganizerLogPage .aoFileName { font-weight: 600; }
+        #libraryFileOrganizerLogPage .aoFileMeta,
+        #libraryFileOrganizerLogPage .aoStatusMessage {
+            margin-top: .22em;
+            font-size: .82em;
+            opacity: .72;
+            overflow-wrap: anywhere;
+        }
+        #libraryFileOrganizerLogPage .aoFilePath {
+            max-width: 30em;
+            margin-top: .18em;
+            overflow: hidden;
+            font-size: .78em;
+            opacity: .55;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #libraryFileOrganizerLogPage .aoStatusMessage {
+            max-width: 20em;
+            display: -webkit-box;
+            overflow: hidden;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+        }
+        #libraryFileOrganizerLogPage .aoDestinationEmpty { font-style: italic; opacity: .6; }
+        #libraryFileOrganizerLogPage .listPaging {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: .5em;
+            min-height: 2.8em;
+        }
+        #libraryFileOrganizerLogPage .listPagingButtons { display: inline-flex; align-items: center; }
+        #libraryFileOrganizerLogPage .aoEmpty,
+        #libraryFileOrganizerLogPage .aoError {
+            padding: 2em 1.2em;
+            border: 1px solid var(--ao-border);
+            border-radius: var(--ao-radius);
+            background: var(--ao-surface);
+            text-align: center;
+        }
+        #libraryFileOrganizerLogPage .aoEmpty .material-icons,
+        #libraryFileOrganizerLogPage .aoError > .material-icons { display: block; margin-bottom: .2em; font-size: 2.4em; opacity: .65; }
+        #libraryFileOrganizerLogPage .aoError {
+            margin-bottom: 1em;
+            border-inline-start: .25em solid rgba(205, 55, 55, .75);
+            background: rgba(205, 55, 55, .08);
+        }
+        #libraryFileOrganizerLogPage .aoError .raised { margin: .9em 0 0; }
+        #libraryFileOrganizerLogPage .visually-hidden {
+            position: absolute !important;
+            width: 1px !important;
+            height: 1px !important;
+            padding: 0 !important;
+            margin: -1px !important;
+            overflow: hidden !important;
+            clip: rect(0, 0, 0, 0) !important;
+            white-space: nowrap !important;
+            border: 0 !important;
+        }
+        #libraryFileOrganizerLogPage button:focus-visible,
+        #libraryFileOrganizerLogPage a:focus-visible,
+        #libraryFileOrganizerLogPage .aoTableWrap:focus-visible {
+            outline: 2px solid currentColor;
+            outline-offset: 2px;
+        }
+        #libraryFileOrganizerLogPage button { transition: transform .15s ease, opacity .15s ease; }
+        #libraryFileOrganizerLogPage button:active:not(:disabled) { transform: scale(.98); }
+        #libraryFileOrganizerLogPage [aria-busy="true"] { cursor: progress; }
+        @media (max-width: 600px) {
+            #libraryFileOrganizerLogPage .aoPageHeader { align-items: stretch; }
+            #libraryFileOrganizerLogPage .aoHeaderActions { justify-content: space-between; width: 100%; }
+            #libraryFileOrganizerLogPage .aoLogSummary { grid-template-columns: 1fr 1fr; }
+            #libraryFileOrganizerLogPage .organizeTaskPanel .raised { flex: 1 1 100%; }
+            #libraryFileOrganizerLogPage .organizeProgress { flex-basis: 100%; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #libraryFileOrganizerLogPage * { scroll-behavior: auto !important; }
+            #libraryFileOrganizerLogPage button { transition: none; }
+        }
+    </style>
 
-    <div>
+    <div data-role="content">
         <div class="content-primary">
-
-            <div>
-                <div class="organizeTaskPanel padded-top padded-bottom hide">
-                    <button is="emby-button" type="button" class="btnClearCompleted raised button-cancel">
-                        <span class="material-icons clear_all" style="margin-right: .5em;"></span>
-                        <span>Clear Completed</span>
-                    </button>
-                    <button is="emby-button" type="button" class="btnClearLog raised button-cancel">
-                        <span class="material-icons clear_all" style="margin-right: .5em;"></span>
-                        <span>Clear All</span>
-                    </button>
-                    <button is="emby-button" type="button" class="btnOrganize raised button-cancel">
-                        <span class="material-icons play_arrow" style="margin-right: .5em;"></span>
-                        <span>Organize</span>
-                    </button>
-                    <progress max="100" min="0" style="width: 100px;" class="organizeProgress"></progress>
+            <div class="aoPageHeader">
+                <div>
+                    <h2>Activity log</h2>
+                    <div class="aoMuted">Review organized files, retry items that need attention, or run the organizer now.</div>
                 </div>
-                <div class="listTopPaging"></div>
-
-                <div class="autoorganizetable">
-                    <table class="tblOrganizationResults table detailTable" style="width:100%;">
-                        <thead>
-                            <tr style="text-align: left;">
-                                <th class="detailTableHeaderCell" data-priority="1"></th>
-                                <th class="detailTableHeaderCell" data-priority="2">Date</th>
-                                <th class="detailTableHeaderCell" data-priority="1">Source</th>
-                                <th class="detailTableHeaderCell" data-priority="3">Destination</th>
-                                <th class="detailTableHeaderCell" data-priority="1"></th>
-                            </tr>
-                        </thead>
-                        <tbody class="resultBody"></tbody>
-                    </table>
+                <div class="aoHeaderActions">
+                    <span class="aoMuted aoLastUpdated" aria-live="polite">Not loaded</span>
+                    <button is="emby-button" type="button" class="btnRefreshLog raised" aria-label="Refresh activity log">
+                        <span class="material-icons refresh" aria-hidden="true"></span>
+                        <span class="aoRefreshLabel">Refresh</span>
+                    </button>
                 </div>
-                <br />
-                <div style="text-align: right; vertical-align: middle;" class="legend">
-                    <div style="display: inline-block; height: 10px; width: 10px; background: green; margin-right: 1px;"></div>
-                    <span>Completed</span>
-                    <div style="display: inline-block; height: 10px; width: 10px; background: red; margin-left: 1em; margin-right: 1px;"></div>
-                    <span>Failed</span>
-                    <div style="display: inline-block; height: 10px; width: 10px; background: blue; margin-left: 1em; margin-right: 1px;"></div>
-                    <span>Skipped</span>
-                </div>
-                <div class="listBottomPaging"></div>
             </div>
+
+            <div class="aoLogSummary" aria-label="Activity summary">
+                <div class="aoMetric"><span class="aoMetricLabel">Total entries</span><span class="aoMetricValue aoTotalCount">—</span></div>
+                <div class="aoMetric"><span class="aoMetricLabel">Completed on page</span><span class="aoMetricValue aoSuccessCount">—</span></div>
+                <div class="aoMetric"><span class="aoMetricLabel">Failed on page</span><span class="aoMetricValue aoFailureCount">—</span></div>
+                <div class="aoMetric"><span class="aoMetricLabel">Skipped on page</span><span class="aoMetricValue aoSkippedCount">—</span></div>
+            </div>
+
+            <div class="organizeTaskPanel hide" aria-label="Organizer task controls">
+                <button is="emby-button" type="button" class="btnOrganize raised button-submit">
+                    <span class="material-icons play_arrow" aria-hidden="true"></span>
+                    <span>Organize now</span>
+                </button>
+                <button is="emby-button" type="button" class="btnClearCompleted raised">
+                    <span class="material-icons done_all" aria-hidden="true"></span>
+                    <span>Clear completed</span>
+                </button>
+                <button is="emby-button" type="button" class="btnClearLog raised button-cancel">
+                    <span class="material-icons clear_all" aria-hidden="true"></span>
+                    <span>Clear all</span>
+                </button>
+                <progress max="100" min="0" class="organizeProgress" aria-label="Auto-organize task progress"></progress>
+            </div>
+
+            <div class="listTopPaging"></div>
+            <div class="autoorganizetable aoTableWrap" tabindex="0" role="region" aria-label="Auto-organize activity">
+                <table class="tblOrganizationResults table detailTable">
+                    <caption class="visually-hidden">Auto-organize file activity ordered newest first</caption>
+                    <thead>
+                        <tr>
+                            <th class="detailTableHeaderCell" data-priority="1">Status</th>
+                            <th class="detailTableHeaderCell" data-priority="2">When</th>
+                            <th class="detailTableHeaderCell" data-priority="1">Source file</th>
+                            <th class="detailTableHeaderCell" data-priority="3">Destination</th>
+                            <th class="detailTableHeaderCell" data-priority="1"><span class="visually-hidden">Actions</span></th>
+                        </tr>
+                    </thead>
+                    <tbody class="resultBody"></tbody>
+                </table>
+            </div>
+            <div class="aoEmpty hide" role="status">
+                <span class="material-icons inventory_2" aria-hidden="true"></span>
+                <strong>No organization activity yet</strong>
+                <div class="aoMuted">New results will appear here after Auto Organize processes files.</div>
+            </div>
+            <div class="aoError hide" role="alert">
+                <span class="material-icons error_outline" aria-hidden="true"></span>
+                <strong>Activity could not be loaded</strong>
+                <div class="aoMuted aoErrorMessage"></div>
+                <button is="emby-button" type="button" class="btnRetryLog raised">
+                    <span class="material-icons refresh" aria-hidden="true"></span>
+                    <span>Try again</span>
+                </button>
+            </div>
+
+            <div class="listBottomPaging"></div>
         </div>
     </div>
-
 </div>

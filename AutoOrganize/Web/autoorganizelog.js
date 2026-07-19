@@ -70,6 +70,10 @@ function findItem(id) {
 }
 
 function getStatusText(item) {
+    if (item.IsInProgress) {
+        return 'Organizing';
+    }
+
     if (item.Status === 'SkippedExisting') {
         return 'Skipped';
     }
@@ -78,7 +82,48 @@ function getStatusText(item) {
         return 'Failed';
     }
 
-    return item.Status || 'Unknown';
+    if (item.Status === 'Success') {
+        return 'Completed';
+    }
+
+    return 'Unknown';
+}
+
+function getStatusClass(item) {
+    if (item.IsInProgress) {
+        return 'aoProgress';
+    }
+
+    if (item.Status === 'Failure') {
+        return 'aoFailure';
+    }
+
+    if (item.Status === 'SkippedExisting') {
+        return 'aoSkipped';
+    }
+
+    return 'aoSuccess';
+}
+
+function formatFileSize(bytes) {
+    let value = Number(bytes || 0);
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    let unit = 0;
+
+    while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit++;
+    }
+
+    return (unit === 0 ? value.toFixed(0) : value.toFixed(value >= 10 ? 1 : 2)) + ' ' + units[unit];
+}
+
+function formatOrganizerType(type) {
+    if (type === 'Episode') {
+        return 'TV episode';
+    }
+
+    return type || 'Unknown';
 }
 
 function showStatusMessage(id) {
@@ -172,6 +217,13 @@ async function reloadItems(page, showSpinner) {
         return;
     }
 
+    const table = page.querySelector('.autoorganizetable');
+    const errorState = page.querySelector('.aoError');
+    table.setAttribute('aria-busy', 'true');
+    errorState.classList.add('hide');
+    page.querySelector('.aoEmpty').classList.add('hide');
+    setRefreshState(page, true);
+
     if (showSpinner) {
         Loading.show();
     }
@@ -190,13 +242,27 @@ async function reloadItems(page, showSpinner) {
             TotalRecordCount: result?.TotalRecordCount ?? 0
         };
         renderResults(page, currentResult);
+        page.querySelector('.aoLastUpdated').textContent =
+            'Updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     } catch (error) {
-        Dashboard.processErrorResponse(error);
+        page.querySelector('.aoErrorMessage').textContent =
+            error?.message || 'Check the Jellyfin server connection and try again.';
+        errorState.classList.remove('hide');
+        page.querySelector('.aoLastUpdated').textContent = 'Refresh failed';
     } finally {
+        table.setAttribute('aria-busy', 'false');
+        setRefreshState(page, false);
         if (showSpinner) {
             Loading.hide();
         }
     }
+}
+
+function setRefreshState(page, busy) {
+    const button = page.querySelector('.btnRefreshLog');
+    button.disabled = busy;
+    button.setAttribute('aria-busy', busy ? 'true' : 'false');
+    button.querySelector('.aoRefreshLabel').textContent = busy ? 'Refreshing…' : 'Refresh';
 }
 
 function getQueryPagingHtml(options) {
@@ -209,9 +275,9 @@ function getQueryPagingHtml(options) {
 
     if (showControls) {
         const startAtDisplay = totalRecordCount ? startIndex + 1 : 0;
-        html += '<span style="vertical-align:middle;">' +
+        html += '<span class="listPagingText">' +
             startAtDisplay + '-' + recordsEnd + ' of ' + totalRecordCount +
-            '</span><div style="display:inline-block;">';
+            '</span><div class="listPagingButtons">';
         html += '<button type="button" is="paper-icon-button-light" class="btnPreviousPage autoSize" ' +
             (startIndex ? '' : 'disabled') +
             ' title="Previous page"><span class="material-icons arrow_back">arrow_back</span></button>';
@@ -259,48 +325,81 @@ function renderResults(page, result) {
     const hasResults = result.TotalRecordCount > 0;
     page.querySelector('.btnClearLog').classList.toggle('hide', !hasResults);
     page.querySelector('.btnClearCompleted').classList.toggle('hide', !hasResults);
+    page.querySelector('.autoorganizetable').classList.toggle('hide', !hasResults);
+    page.querySelector('.aoEmpty').classList.toggle('hide', hasResults);
+    page.querySelector('.aoError').classList.add('hide');
+    updateLogSummary(page, result);
+}
+
+function updateLogSummary(page, result) {
+    const items = result.Items || [];
+    page.querySelector('.aoTotalCount').textContent = Number(result.TotalRecordCount || 0).toLocaleString();
+    page.querySelector('.aoSuccessCount').textContent =
+        items.filter(item => !item.IsInProgress && item.Status === 'Success').length.toLocaleString();
+    page.querySelector('.aoFailureCount').textContent =
+        items.filter(item => !item.IsInProgress && item.Status === 'Failure').length.toLocaleString();
+    page.querySelector('.aoSkippedCount').textContent =
+        items.filter(item => !item.IsInProgress && item.Status === 'SkippedExisting').length.toLocaleString();
 }
 
 function getDisplayDate(value) {
     try {
         const date = Dashboard.datetime.parseISO8601Date(value, true);
-        return Dashboard.datetime.toLocaleDateString(date);
+        return {
+            iso: date.toISOString(),
+            text: date.toLocaleString()
+        };
     } catch {
-        return value || '';
+        return {
+            iso: '',
+            text: value || ''
+        };
     }
 }
 
 function renderItemRow(item) {
     const id = escapeHtml(item.Id);
     const fileName = escapeHtml(item.OriginalFileName);
+    const originalPath = escapeHtml(item.OriginalPath || item.OriginalFileName);
     const targetPath = escapeHtml(item.TargetPath || '');
-    const status = item.Status;
-    const spinnerClass = item.IsInProgress ? 'syncSpinner' : 'syncSpinner hide';
-    let sourceHtml;
+    const statusText = getStatusText(item);
+    const statusClass = getStatusClass(item);
+    const statusMessage = escapeHtml(item.StatusMessage || '');
+    const date = getDisplayDate(item.Date);
+    const dateAttribute = date.iso ? ' datetime="' + escapeHtml(date.iso) + '"' : '';
+    const statusDetails = statusMessage
+        ? '<div class="aoStatusMessage" title="' + statusMessage + '">' + statusMessage + '</div>'
+        : '';
+    let statusHtml;
 
-    if (item.IsInProgress) {
-        sourceHtml = '<span style="color:darkorange;">' + fileName + '</span>';
-    } else if (status === 'SkippedExisting' || status === 'Failure') {
-        const color = status === 'SkippedExisting' ? 'blue' : 'red';
-        sourceHtml = '<a is="emby-linkbutton" data-resultid="' + id + '" style="color:' + color +
-            ';" href="#" class="button-link btnShowStatusMessage">' + fileName + '</a>';
+    if (!item.IsInProgress && statusMessage) {
+        statusHtml = '<button is="emby-button" type="button" data-resultid="' + id +
+            '" class="btnShowStatusMessage aoStatusBadge ' + statusClass +
+            '" aria-label="Show ' + escapeHtml(statusText) + ' details">' + escapeHtml(statusText) + '</button>';
     } else {
-        sourceHtml = '<span style="color:green;">' + fileName + '</span>';
+        statusHtml = '<span class="aoStatusBadge ' + statusClass + '">' + escapeHtml(statusText) + '</span>';
     }
 
     let buttons = '';
-    if (!item.IsInProgress && status !== 'Success') {
+    if (!item.IsInProgress && item.Status !== 'Success') {
         buttons += '<button type="button" is="paper-icon-button-light" data-resultid="' + id +
-            '" class="btnProcessResult organizerButton autoSize" title="Organize"><span class="material-icons edit">edit</span></button>';
+            '" class="btnProcessResult organizerButton autoSize" title="Correct and organize" aria-label="Correct and organize ' +
+            fileName + '"><span class="material-icons edit">edit</span></button>';
         buttons += '<button type="button" is="paper-icon-button-light" data-resultid="' + id +
-            '" class="btnDeleteResult organizerButton autoSize" title="Delete source"><span class="material-icons delete">delete</span></button>';
+            '" class="btnDeleteResult organizerButton autoSize" title="Delete source" aria-label="Delete source ' +
+            fileName + '"><span class="material-icons delete">delete</span></button>';
     }
 
-    return '<td class="detailTableBodyCell"><img src="css/images/throbber.gif" alt="" class="' +
-        spinnerClass + '" style="vertical-align:middle;" /></td>' +
-        '<td class="detailTableBodyCell" data-title="Date">' + escapeHtml(getDisplayDate(item.Date)) + '</td>' +
-        '<td data-title="Source" class="detailTableBodyCell fileCell">' + sourceHtml + '</td>' +
-        '<td data-title="Destination" class="detailTableBodyCell fileCell">' + targetPath + '</td>' +
+    return '<td class="detailTableBodyCell" data-title="Status">' + statusHtml + statusDetails + '</td>' +
+        '<td class="detailTableBodyCell" data-title="When"><time' + dateAttribute + '>' +
+            escapeHtml(date.text) + '</time></td>' +
+        '<td data-title="Source file" class="detailTableBodyCell fileCell">' +
+            '<div class="aoFileName" title="' + originalPath + '">' + fileName + '</div>' +
+            '<div class="aoFileMeta">' + escapeHtml(formatOrganizerType(item.Type)) + ' · ' +
+                escapeHtml(formatFileSize(item.FileSize)) + '</div>' +
+            '<div class="aoFilePath" title="' + originalPath + '">' + originalPath + '</div></td>' +
+        '<td data-title="Destination" class="detailTableBodyCell fileCell">' +
+            (targetPath || '<span class="aoDestinationEmpty">Not resolved</span>') + '</td>' +
         '<td class="detailTableBodyCell organizerButtonCell" style="white-space:nowrap;">' + buttons + '</td>';
 }
 
@@ -354,6 +453,8 @@ function updateItemStatus(page, item) {
     const row = page.querySelector('#row' + item.Id);
     if (row) {
         row.innerHTML = renderItemRow(item);
+        updateLogSummary(page, currentResult);
+        page.querySelector('.aoLastUpdated').textContent = 'Updated just now';
     } else {
         reloadItems(page, false);
     }
@@ -403,10 +504,21 @@ export default function (view) {
 
     view.querySelector('.resultBody').addEventListener('click', handleItemClick);
     view.querySelector('.btnClearLog').addEventListener('click', function () {
-        clearLog(view, false);
+        Dashboard.confirm(
+            'Clear every activity entry? This does not delete any media files.',
+            'Clear Activity Log'
+        ).then(function () {
+            clearLog(view, false);
+        });
     });
     view.querySelector('.btnClearCompleted').addEventListener('click', function () {
         clearLog(view, true);
+    });
+    view.querySelector('.btnRetryLog').addEventListener('click', function () {
+        reloadItems(view, true);
+    });
+    view.querySelector('.btnRefreshLog').addEventListener('click', function () {
+        reloadItems(view, false);
     });
 
     view.addEventListener('viewshow', function () {

@@ -1,202 +1,296 @@
-<div id="libraryFileOrganizerMoviePage" data-role="page" class="page type-interior pluginConfigurationPage withTabs" data-controller="__plugin/AutoOrganizeMovieJs">
-    <div>
+<div id="libraryFileOrganizerMoviePage" data-role="page" class="page type-interior pluginConfigurationPage withTabs autoOrganizePage" data-controller="__plugin/AutoOrganizeMovieJs">
+    <style>
+        #libraryFileOrganizerMoviePage {
+            --ao-radius: .7em;
+            --ao-radius-small: .48em;
+            --ao-surface: rgba(128, 128, 128, .08);
+            --ao-surface-strong: rgba(128, 128, 128, .13);
+            --ao-border: rgba(128, 128, 128, .28);
+            --ao-divider: rgba(128, 128, 128, .22);
+        }
+        @supports (background: color-mix(in srgb, currentColor 10%, transparent)) {
+            #libraryFileOrganizerMoviePage {
+                --ao-surface: color-mix(in srgb, currentColor 6%, transparent);
+                --ao-surface-strong: color-mix(in srgb, currentColor 10%, transparent);
+                --ao-border: color-mix(in srgb, currentColor 24%, transparent);
+                --ao-divider: color-mix(in srgb, currentColor 18%, transparent);
+            }
+        }
+        #libraryFileOrganizerMoviePage *,
+        #libraryFileOrganizerMoviePage *::before,
+        #libraryFileOrganizerMoviePage *::after { box-sizing: border-box; }
+        #libraryFileOrganizerMoviePage .content-primary,
+        #libraryFileOrganizerMoviePage .libraryFileOrganizerForm { min-width: 0; }
+        #libraryFileOrganizerMoviePage .aoPageHeader { margin-bottom: 1.4em; }
+        #libraryFileOrganizerMoviePage .aoPageHeader h2 { margin-bottom: .25em; }
+        #libraryFileOrganizerMoviePage .aoMuted { opacity: .72; }
+        #libraryFileOrganizerMoviePage .libraryFileOrganizerForm { margin-top: 1em; }
+        #libraryFileOrganizerMoviePage .aoSection {
+            margin: 0 0 1em;
+            border: 1px solid var(--ao-border);
+            border-radius: var(--ao-radius);
+            background: var(--ao-surface);
+            overflow: clip;
+        }
+        #libraryFileOrganizerMoviePage .aoSection > summary,
+        #libraryFileOrganizerMoviePage .aoSubsection > summary {
+            cursor: pointer;
+            overflow-wrap: anywhere;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+        #libraryFileOrganizerMoviePage .aoSection > summary {
+            padding: 1em 1.1em;
+            font-size: 1.08em;
+            font-weight: 600;
+            background: var(--ao-surface-strong);
+        }
+        #libraryFileOrganizerMoviePage .aoSection > summary:hover,
+        #libraryFileOrganizerMoviePage .aoSubsection > summary:hover { filter: brightness(1.08); }
+        #libraryFileOrganizerMoviePage .aoSection > summary:focus-visible,
+        #libraryFileOrganizerMoviePage .aoSubsection > summary:focus-visible,
+        #libraryFileOrganizerMoviePage button:focus-visible {
+            outline: 2px solid currentColor;
+            outline-offset: 2px;
+        }
+        #libraryFileOrganizerMoviePage .aoSectionBody { padding: 1em 1.1em 1.1em; }
+        #libraryFileOrganizerMoviePage .aoGrid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr));
+            gap: 1em;
+            min-width: 0;
+        }
+        #libraryFileOrganizerMoviePage .aoGrid > * { min-width: 0; margin: 0; }
+        #libraryFileOrganizerMoviePage .aoSpanAll { grid-column: 1 / -1; }
+        #libraryFileOrganizerMoviePage .aoPathField {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: .45em;
+            align-items: center;
+        }
+        #libraryFileOrganizerMoviePage .aoSubsection {
+            margin-top: 1em;
+            border-top: 1px solid var(--ao-divider);
+            padding-top: .2em;
+        }
+        #libraryFileOrganizerMoviePage .aoSubsection > summary { padding: .8em 0; font-weight: 600; }
+        #libraryFileOrganizerMoviePage .aoSubsectionBody { padding: .25em 0 .2em; }
+        #libraryFileOrganizerMoviePage .aoTableWrap {
+            max-width: 100%;
+            overflow-x: auto;
+            overscroll-behavior-inline: contain;
+            -webkit-overflow-scrolling: touch;
+            margin-top: .7em;
+            border: 1px solid var(--ao-border);
+            border-radius: var(--ao-radius-small);
+        }
+        #libraryFileOrganizerMoviePage .aoTable {
+            width: 100%;
+            min-width: 520px;
+            border-collapse: collapse;
+            font-size: .92em;
+        }
+        #libraryFileOrganizerMoviePage .aoTable th,
+        #libraryFileOrganizerMoviePage .aoTable td {
+            padding: .55em .62em;
+            border-bottom: 1px solid var(--ao-divider);
+            text-align: left;
+        }
+        #libraryFileOrganizerMoviePage .aoTable th { background: var(--ao-surface-strong); font-weight: 600; }
+        #libraryFileOrganizerMoviePage .aoTable tbody tr:last-child td { border-bottom: 0; }
+        #libraryFileOrganizerMoviePage .aoWarning {
+            padding: .8em;
+            border-inline-start: .25em solid rgba(215, 135, 28, .75);
+            border-radius: var(--ao-radius-small);
+            background: rgba(215, 135, 28, .08);
+        }
+        #libraryFileOrganizerMoviePage .aoDependent { transition: opacity .2s ease; }
+        #libraryFileOrganizerMoviePage .aoDependentDisabled { opacity: .48; }
+        #libraryFileOrganizerMoviePage .aoActions { display: flex; justify-content: flex-end; margin-top: 1em; }
+        #libraryFileOrganizerMoviePage .aoActions .button-submit { min-width: min(100%, 12em); }
+        #libraryFileOrganizerMoviePage .aoActions button { transition: transform .15s ease, opacity .15s ease; }
+        #libraryFileOrganizerMoviePage .aoActions button:active:not(:disabled) { transform: scale(.98); }
+        #libraryFileOrganizerMoviePage [aria-busy="true"] { cursor: progress; }
+        @media (max-width: 600px) {
+            #libraryFileOrganizerMoviePage .aoSectionBody { padding: .82em; }
+            #libraryFileOrganizerMoviePage .aoSection > summary { padding: .9em .82em; }
+            #libraryFileOrganizerMoviePage .aoActions,
+            #libraryFileOrganizerMoviePage .aoActions .button-submit { width: 100%; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #libraryFileOrganizerMoviePage .aoDependent,
+            #libraryFileOrganizerMoviePage .aoActions button { transition: none; }
+        }
+    </style>
+
+    <div data-role="content">
         <div class="content-primary">
+            <div class="aoPageHeader">
+                <h2>Movies</h2>
+                <div class="aoMuted">Watch incoming movie files, choose their naming rules, and keep your movie libraries organized automatically.</div>
+            </div>
 
-            <form class="libraryFileOrganizerForm padded-top">
+            <form class="libraryFileOrganizerForm">
+                <details class="aoSection" open>
+                    <summary>Watch folder and transfer</summary>
+                    <div class="aoSectionBody aoGrid">
+                        <div class="checkboxContainer checkboxContainer-withDescription aoSpanAll">
+                            <label>
+                                <input type="checkbox" is="emby-checkbox" id="chkEnableMovieSorting" />
+                                <span>Enable auto-organize for movies</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">Monitor the watch folder and organize new movie files automatically.</div>
+                        </div>
+                        <div class="aoDependent aoGrid aoSpanAll">
+                            <div class="inputContainer aoSpanAll">
+                                <div class="aoPathField">
+                                    <div>
+                                        <input is="emby-input" id="txtWatchMovieFolder" type="text" label="Watch folder" />
+                                        <div class="fieldDescription">This folder will be monitored for new movies.</div>
+                                    </div>
+                                    <button type="button" is="paper-icon-button-light" id="btnSelectWatchMovieFolder" title="Select watch folder" aria-label="Select watch folder" class="autoSize">
+                                        <span class="material-icons search"></span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="inputContainer">
+                                <input is="emby-input" id="txtMovieMinFileSize" type="number" label="Minimum file size (MB)" pattern="[0-9]*" min="0" required />
+                                <div class="fieldDescription">Files smaller than this will be ignored.</div>
+                            </div>
+                            <div class="selectContainer">
+                                <select is="emby-select" id="copyOrMoveMovieFile" label="Transfer method">
+                                    <option value="true">Copy</option>
+                                    <option value="false">Move</option>
+                                </select>
+                                <div class="fieldDescription editorfieldDescription">Choose how files leave the watch folder.</div>
+                            </div>
+                            <div class="checkboxContainer checkboxContainer-withDescription aoSpanAll">
+                                <label>
+                                    <input type="checkbox" is="emby-checkbox" id="chkOverwriteExistingMovies" />
+                                    <span>Overwrite existing movies</span>
+                                </label>
+                                <div class="fieldDescription checkboxFieldDescription">Replace a destination file when the generated path already exists.</div>
+                            </div>
+                        </div>
+                    </div>
+                </details>
 
-                <div>
-                    <label class="checkboxContainer">
-                        <input type="checkbox" is="emby-checkbox" id="chkEnableMovieSorting" />
-                        <span>Enable auto-organize for movies</span>
-                    </label>
-                </div>
-                <div class="inputContainer">
-                    <div style="display:flex; align-items:center;">
-                        <div style="flex-grow:1;">
-                            <input is="emby-input" id="txtWatchMovieFolder" type="text" label="Watch folder:" />
-                            <div class="fieldDescription">This folder will be monitored for new movies.</div>
-                        </div>
-                        <button type="button" is="paper-icon-button-light" id="btnSelectWatchMovieFolder" title="Select directory" class="autoSize">
-                            <span class="material-icons search"></span>
-                        </button>
-                    </div>
-                </div>
-                <div class="inputContainer">
-                    <input is="emby-input" id="txtMovieMinFileSize" type="number" label="Min file size:" pattern="[0-9]*" min="0" required />
-                    <div class="fieldDescription">Files smaller than this will be ignored.</div>
-                </div>
-                <div class="checkboxContainer">
-                    <label>
-                        <input type="checkbox" is="emby-checkbox" id="chkSubMovieFolders" />
-                        <span>Create subdirectory per Movie</span>
-                    </label>
-                </div>
-                <div is="emby-collapse" class="hide fldSelectMovieFolderPattern" title="Movie folder pattern">
-                    <div class="collapseContent">
-                        <br />
-                        <div class="inputContainer">
-                            <input is="emby-input" id="txtMovieFolderPattern" type="text" label="Movie folder pattern:" required />
-                            <div class="fieldDescription movieFolderPatternDescription"></div>
-                        </div>
-                        <br />
-                        <p>Supported Patterns</p>
-                        <table id="movie-folder-pattern-table" class="ui-responsive">
-                            <thead>
-                                <tr>
-                                    <th>Term</th>
-                                    <th>Pattern</th>
-                                    <th>Result</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>Movie name</td>
-                                    <td>%mn</td>
-                                    <td>Movie name</td>
-                                </tr>
-                                <tr>
-                                    <td>Movie name</td>
-                                    <td>%m.n</td>
-                                    <td>Movie.name</td>
-                                </tr>
-                                <tr>
-                                    <td>Movie name</td>
-                                    <td>%m_n</td>
-                                    <td>Movie_name</td>
-                                </tr>
-                                <tr>
-                                    <td>Production year</td>
-                                    <td>%my</td>
-                                    <td>2017</td>
-                                </tr>
-                                <tr>
-                                    <td>File extension</td>
-                                    <td>%ext</td>
-                                    <td>mkv</td>
-                                </tr>
-                                <tr>
-                                    <td>Original File Name</td>
-                                    <td>%fn</td>
-                                    <td>filename</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                <div is="emby-collapse" title="Movie file pattern">
-                    <div class="collapseContent">
-                        <br />
+                <details class="aoSection aoDependent" open>
+                    <summary>Folders and naming</summary>
+                    <div class="aoSectionBody">
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label>
-                                <input type="checkbox" is="emby-checkbox" id="chkPreserveMovieFilename" />
-                                <span>Preserve original movie filename</span>
+                                <input type="checkbox" is="emby-checkbox" id="chkSubMovieFolders" />
+                                <span>Create a subdirectory for each movie</span>
                             </label>
-                            <div class="fieldDescription checkboxFieldDescription">Keep the incoming media filename and extension while still creating the configured movie folder.</div>
-                        </div>
-                        <div class="inputContainer">
-                            <input is="emby-input" id="txtMoviePattern" type="text" label="Movie pattern:" required />
-                            <div class="fieldDescription moviePatternDescription"></div>
+                            <div class="fieldDescription checkboxFieldDescription">Place each movie in its own generated folder.</div>
                         </div>
 
-                        <br />
-                        <p>Supported Patterns</p>
+                        <details class="aoSubsection fldSelectMovieFolderPattern hide">
+                            <summary>Movie folder pattern</summary>
+                            <div class="aoSubsectionBody">
+                                <div class="inputContainer">
+                                    <input is="emby-input" id="txtMovieFolderPattern" type="text" label="Movie folder pattern" required />
+                                    <div class="fieldDescription movieFolderPatternDescription"></div>
+                                </div>
+                                <div class="aoTableWrap" tabindex="0" role="region" aria-label="Supported movie folder patterns">
+                                    <table id="movie-folder-pattern-table" class="aoTable">
+                                        <thead><tr><th scope="col">Term</th><th scope="col">Pattern</th><th scope="col">Result</th></tr></thead>
+                                        <tbody>
+                                            <tr><td>Movie name</td><td><code>%mn</code></td><td>Movie name</td></tr>
+                                            <tr><td>Movie name</td><td><code>%m.n</code></td><td>Movie.name</td></tr>
+                                            <tr><td>Movie name</td><td><code>%m_n</code></td><td>Movie_name</td></tr>
+                                            <tr><td>Production year</td><td><code>%my</code></td><td>2017</td></tr>
+                                            <tr><td>File extension</td><td><code>%ext</code></td><td>mkv</td></tr>
+                                            <tr><td>Original file name</td><td><code>%fn</code></td><td>filename</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </details>
 
-                        <table id="movie-file-pattern-table" class="ui-responsive">
-                            <thead>
-                                <tr>
-                                    <th>Term</th>
-                                    <th>Pattern</th>
-                                    <th>Result</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>Movie name</td>
-                                    <td>%mn</td>
-                                    <td>Movie name</td>
-                                </tr>
-                                <tr>
-                                    <td>Movie name</td>
-                                    <td>%m.n</td>
-                                    <td>Movie.name</td>
-                                </tr>
-                                <tr>
-                                    <td>Movie name</td>
-                                    <td>%m_n</td>
-                                    <td>Movie_name</td>
-                                </tr>
-                                <tr>
-                                    <td>Production year</td>
-                                    <td>%my</td>
-                                    <td>2017</td>
-                                </tr>
-                                <tr>
-                                    <td>File extension</td>
-                                    <td>%ext</td>
-                                    <td>mkv</td>
-                                </tr>
-                                <tr>
-                                    <td>Original File Name</td>
-                                    <td>%fn</td>
-                                    <td>filename</td>
-                                </tr>
-                            </tbody>
-                        </table>
+                        <details class="aoSubsection" open>
+                            <summary>Movie file pattern</summary>
+                            <div class="aoSubsectionBody">
+                                <div class="checkboxContainer checkboxContainer-withDescription">
+                                    <label>
+                                        <input type="checkbox" is="emby-checkbox" id="chkPreserveMovieFilename" />
+                                        <span>Preserve original movie filename</span>
+                                    </label>
+                                    <div class="fieldDescription checkboxFieldDescription">Keep the incoming media filename and extension while still creating the configured movie folder.</div>
+                                </div>
+                                <div class="inputContainer">
+                                    <input is="emby-input" id="txtMoviePattern" type="text" label="Movie pattern" required />
+                                    <div class="fieldDescription moviePatternDescription"></div>
+                                </div>
+                                <div class="aoTableWrap" tabindex="0" role="region" aria-label="Supported movie file patterns">
+                                    <table id="movie-file-pattern-table" class="aoTable">
+                                        <thead><tr><th scope="col">Term</th><th scope="col">Pattern</th><th scope="col">Result</th></tr></thead>
+                                        <tbody>
+                                            <tr><td>Movie name</td><td><code>%mn</code></td><td>Movie name</td></tr>
+                                            <tr><td>Movie name</td><td><code>%m.n</code></td><td>Movie.name</td></tr>
+                                            <tr><td>Movie name</td><td><code>%m_n</code></td><td>Movie_name</td></tr>
+                                            <tr><td>Production year</td><td><code>%my</code></td><td>2017</td></tr>
+                                            <tr><td>File extension</td><td><code>%ext</code></td><td>mkv</td></tr>
+                                            <tr><td>Original file name</td><td><code>%fn</code></td><td>filename</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </details>
                     </div>
-                </div>
+                </details>
 
-                <br /><br />
-                <div class="selectContainer">
-                    <select is="emby-select" id="copyOrMoveMovieFile" label="Transfer method:">
-                        <option value="true">Copy</option>
-                        <option value="false">Move</option>
-                    </select>
-                    <div class="fieldDescription editorfieldDescription">Copy or move files from the watch folder</div>
-                </div>
-                <div>
-                    <label class="checkboxContainer">
-                        <input type="checkbox" is="emby-checkbox" id="chkOverwriteExistingMovies" />
-                        <span>Overwrite existing movies</span>
-                    </label>
-                </div>
-                <div class="inputContainer">
-                    <input is="emby-input" id="txtDeleteLeftOverMovieFiles" type="text" label="Delete left over files" />
-                    <div class="fieldDescription">Provide a list of file extensions to delete, separated by semicolons (;)</div>
-                </div>
-                <div class="checkboxContainer checkboxContainer-withDescription">
-                    <label>
-                        <input type="checkbox" is="emby-checkbox" id="chkDeleteEmptyMovieFolders" />
-                        <span>Delete empty folders</span>
-                    </label>
-                    <div class="fieldDescription checkboxFieldDescription">Empty folders will be deleted</div>
-                </div>
-                <div class="checkboxContainer checkboxContainer-withDescription">
-                    <label>
-                        <input type="checkbox" is="emby-checkbox" id="chkExtendedClean" />
-                        <span>Extended Clean</span>
-                    </label>
-                    <div class="fieldDescription checkboxFieldDescription">Extended clean of left over files and empty folders</div>
-                </div>
-                <div class="checkboxContainer checkboxContainer-withDescription">
-                    <label>
-                        <input type="checkbox" is="emby-checkbox" id="chkQueueLibScan" />
-                        <span>Queue library scan on completion</span>
-                    </label>
-                    <div class="fieldDescription checkboxFieldDescription">Queue a library scan on completion, when enabled for both movies and TV shows, the library scan is triggered once</div>
-                </div>
-                <div class="checkboxContainer checkboxContainer-withDescription">
-                    <label>
-                        <input type="checkbox" is="emby-checkbox" id="chkEnableMovieAutoDetect" />
-                        <span>Enable auto-detect for movies</span>
-                    </label>
-                    <div class="fieldDescription checkboxFieldDescription">Warning Beta feature, Use with caution, this may cause significantly longer scans and false identification</div>
-                </div>
-                <div class="fldSelectMovieFolder hide selectContainer">
-                    <select id="selectMovieFolder" is="emby-select" label="Default Movie library:"></select>
-                </div>
-                <div>
+                <details class="aoSection aoDependent" open>
+                    <summary>Cleanup and library updates</summary>
+                    <div class="aoSectionBody aoGrid">
+                        <div class="inputContainer aoSpanAll">
+                            <input is="emby-input" id="txtDeleteLeftOverMovieFiles" type="text" label="Delete leftover files" />
+                            <div class="fieldDescription">Enter file extensions separated by semicolons (;).</div>
+                        </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label>
+                                <input type="checkbox" is="emby-checkbox" id="chkDeleteEmptyMovieFolders" />
+                                <span>Delete empty folders</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">Remove empty source folders after organization.</div>
+                        </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label>
+                                <input type="checkbox" is="emby-checkbox" id="chkExtendedClean" />
+                                <span>Extended clean</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">Also clean configured leftover files and empty folders.</div>
+                        </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription aoSpanAll">
+                            <label>
+                                <input type="checkbox" is="emby-checkbox" id="chkQueueLibScan" />
+                                <span>Queue library scan on completion</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">When enabled for both movies and TV shows, one library scan is queued after all organization work completes.</div>
+                        </div>
+                    </div>
+                </details>
+
+                <details class="aoSection aoDependent">
+                    <summary>Automatic matching</summary>
+                    <div class="aoSectionBody">
+                        <div class="checkboxContainer checkboxContainer-withDescription aoWarning">
+                            <label>
+                                <input type="checkbox" is="emby-checkbox" id="chkEnableMovieAutoDetect" />
+                                <span>Enable automatic movie detection</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">Beta feature. Detection can make scans significantly slower and may identify files incorrectly.</div>
+                        </div>
+                        <div class="fldSelectMovieFolder hide selectContainer">
+                            <select id="selectMovieFolder" is="emby-select" label="Default movie library"></select>
+                        </div>
+                    </div>
+                </details>
+
+                <div class="aoActions">
                     <button is="emby-button" type="submit" class="raised button-submit block">
-                        <span>Save</span>
+                        <span class="aoSaveLabel" aria-live="polite">Save changes</span>
                     </button>
                 </div>
             </form>

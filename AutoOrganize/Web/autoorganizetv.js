@@ -126,8 +126,20 @@ function loadPage(view, config) {
     view.querySelector('#chkQueueLibScan').checked = Boolean(tvOptions.QueueLibraryScan);
 }
 
-function onSubmit(view) {
-    ApiClient.getNamedConfiguration('autoorganize').then(function (config) {
+async function onSubmit(view) {
+    const button = view.querySelector('.libraryFileOrganizerForm button[type="submit"]');
+    const label = button.querySelector('.aoSaveLabel');
+
+    if (button.disabled) {
+        return false;
+    }
+
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    label.textContent = 'Saving…';
+
+    try {
+        const config = await ApiClient.getNamedConfiguration('autoorganize');
         const tvOptions = config.TvOptions || {};
         const minFileSize = Number.parseInt(view.querySelector('#txtMinFileSize').value, 10);
 
@@ -153,8 +165,15 @@ function onSubmit(view) {
         tvOptions.CopyOriginalFile = view.querySelector('#copyOrMoveFile').value === 'true';
         tvOptions.QueueLibraryScan = view.querySelector('#chkQueueLibScan').checked;
 
-        return ApiClient.updateNamedConfiguration('autoorganize', config);
-    }).then(Dashboard.processServerConfigurationUpdateResult, Dashboard.processErrorResponse);
+        const result = await ApiClient.updateNamedConfiguration('autoorganize', config);
+        Dashboard.processServerConfigurationUpdateResult(result);
+    } catch (error) {
+        Dashboard.processErrorResponse(error);
+    } finally {
+        button.disabled = false;
+        button.setAttribute('aria-busy', 'false');
+        label.textContent = 'Save changes';
+    }
 
     return false;
 }
@@ -253,6 +272,25 @@ export default function (view) {
         }
     }
 
+    function updateOrganizerState() {
+        const enabled = view.querySelector('#chkEnableTvSorting').checked;
+        const form = view.querySelector('.libraryFileOrganizerForm');
+
+        form.querySelectorAll('input, select, button').forEach(function (control) {
+            if (control.id !== 'chkEnableTvSorting' && control.type !== 'submit') {
+                control.disabled = !enabled;
+            }
+        });
+        view.querySelectorAll('.aoDependent').forEach(function (section) {
+            section.classList.toggle('aoDependentDisabled', !enabled);
+        });
+
+        if (enabled) {
+            toggleEpisodePatterns();
+            toggleSeriesLocation();
+        }
+    }
+
     function populateSeriesLocation(config) {
         const tvOptions = config.TvOptions || {};
 
@@ -285,6 +323,7 @@ export default function (view) {
     view.querySelector('#chkPreserveEpisodeFilename').addEventListener('change', toggleEpisodePatterns);
     view.querySelector('#btnSelectWatchFolder').addEventListener('click', selectWatchFolder);
     view.querySelector('#chkEnableSeriesAutoDetect').addEventListener('change', toggleSeriesLocation);
+    view.querySelector('#chkEnableTvSorting').addEventListener('change', updateOrganizerState);
 
     view.querySelector('.libraryFileOrganizerForm').addEventListener('submit', function (event) {
         event.preventDefault();
@@ -302,6 +341,7 @@ export default function (view) {
             toggleEpisodePatterns();
             populateSeriesLocation(config);
             toggleSeriesLocation();
+            updateOrganizerState();
         }, onApiFailure);
     });
 }

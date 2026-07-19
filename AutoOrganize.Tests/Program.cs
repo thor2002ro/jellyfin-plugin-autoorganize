@@ -544,6 +544,27 @@ internal static class Program
             string script = ReadResource("AutoOrganize.Web.autoorganizemovie.js");
             Contains("movieOptions.PreserveOriginalFilename", script);
         });
+        Add("dashboard exposes guarded saves and recoverable list states", () =>
+        {
+            foreach (string page in new[] { "tv", "movie" })
+            {
+                string html = ReadResource($"AutoOrganize.Web.autoorganize{page}.html");
+                string script = ReadResource($"AutoOrganize.Web.autoorganize{page}.js");
+                Contains("class=\"aoSaveLabel\"", html);
+                Contains("aoDependentDisabled", html);
+                Contains("updateOrganizerState", script);
+                Contains("button.setAttribute('aria-busy', 'true')", script);
+            }
+
+            Contains("btnRetryLog", ReadResource("AutoOrganize.Web.autoorganizelog.html"));
+            string logScript = ReadResource("AutoOrganize.Web.autoorganizelog.js");
+            Contains("btnRetryLog", logScript);
+            Contains("btnRefreshLog", ReadResource("AutoOrganize.Web.autoorganizelog.html"));
+            Contains("formatFileSize", logScript);
+            Contains("updateLogSummary", logScript);
+            Contains("btnRetrySmart", ReadResource("AutoOrganize.Web.autoorganizesmart.html"));
+            Contains("btnRetrySmart", ReadResource("AutoOrganize.Web.autoorganizesmart.js"));
+        });
         Add("dashboard scripts do not modify the shared API client prototype", () =>
         {
             Assembly assembly = typeof(EpisodeNameFormatter).Assembly;
