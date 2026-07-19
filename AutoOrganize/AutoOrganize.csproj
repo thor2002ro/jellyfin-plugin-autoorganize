@@ -6,6 +6,7 @@
     <AssemblyVersion>13.1.0.0</AssemblyVersion>
     <FileVersion>13.1.0.0</FileVersion>
     <InformationalVersion>13.1.0+jellyfin.10.11</InformationalVersion>
+    <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -43,7 +44,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Diacritics" Version="4.0.17" />
+    <PackageReference Include="Diacritics" Version="4.1.8" />
     <PackageReference Include="Jellyfin.Controller" Version="10.11.11" ExcludeAssets="runtime" />
     <PackageReference Include="Jellyfin.Database.Implementations" Version="10.11.11" ExcludeAssets="runtime" />
     <PackageReference Include="Jellyfin.Model" Version="10.11.11" ExcludeAssets="runtime" />

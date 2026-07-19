@@ -1,52 +1,63 @@
-**DEPRECATION NOTICE**: The AutoOrganize plugin has been deprecated due to maintainability issues and many bugs.
+# Auto Organize for Jellyfin 10.11
 
-<h1 align="center">Jellyfin AutoOrganize Plugin</h1>
-<h3 align="center">Part of the <a href="https://jellyfin.media">Jellyfin Project</a></h3>
+> Community maintenance build derived from the archived MIT-licensed Auto Organize plugin. It is not an official Jellyfin release.
 
-<p align="center">
-<img alt="Plugin Banner" src="https://raw.githubusercontent.com/jellyfin/jellyfin-ux/master/plugins/SVG/jellyfin-plugin-autoorganize.svg?sanitize=true"/>
-<br/>
-<br/>
-<a href="https://github.com/jellyfin/jellyfin-plugin-autoorganize/actions?query=workflow%3A%22Test+Build+Plugin%22">
-<img alt="GitHub Workflow Status" src="https://img.shields.io/github/workflow/status/jellyfin/jellyfin-plugin-autoorganize/Test%20Build%20Plugin.svg">
-</a>
-<a href="https://github.com/jellyfin/jellyfin-plugin-autoorganize">
-<img alt="MIT License" src="https://img.shields.io/github/license/jellyfin/jellyfin-plugin-autoorganize.svg"/>
-</a>
-<a href="https://github.com/jellyfin/jellyfin-plugin-autoorganize/releases">
-<img alt="Current Release" src="https://img.shields.io/github/release/jellyfin/jellyfin-plugin-autoorganize.svg"/>
-</a>
-</p>
+This source tree updates the archived Jellyfin Auto Organize plugin for Jellyfin **10.11.11** and **.NET 9**. It retains the Jellyfin-native dependency-injection, naming-parser, path-safety, crash-safe transfer, and SQLite recovery work while incorporating useful behavior from the maintained Emby sibling.
 
-## About
+## New organization options
 
-Jellyfin AutoOrganize plugin is a plugin to automatically organize your media
+### TV
 
-## Installation
+- **Preserve original episode filename** stores the incoming basename and extension unchanged.
+- **Always place episodes in season folders** forces the configured season folder pattern even when an existing series currently has a flat layout.
 
-[See the official documentation for install instructions](https://jellyfin.org/docs/general/server/plugins/index.html#installing).
+With both enabled, an incoming file such as:
+
+```text
+The.Show.S02E04.1080p.WEB-DL-GROUP.mkv
+```
+
+is placed as:
+
+```text
+TV/The Show (2026)/Season 02/The.Show.S02E04.1080p.WEB-DL-GROUP.mkv
+```
+
+The example uses the season-folder pattern `Season %0s`; other configured
+season-folder patterns are respected.
+
+### Movies
+
+- **Preserve original movie filename** stores the incoming basename and extension unchanged.
+- Enable **Create subdirectory per Movie** to produce `Movie Name (Year)/original-filename.ext`.
+
+## Other parity and regression fixes
+
+- Exact provider search followed by a normalized dotted/underscored/hyphenated-title retry.
+- Manual creation works without provider IDs.
+- Explicitly selected library roots are retained for manual corrections.
+- Duplicate terminal year suffixes such as `The Office (2005) (2005)` are prevented.
+- Input filename parsing remains delegated to Jellyfin's 10.11 naming library.
+- Administration scripts remain plugin-local and do not modify the shared API client prototype.
 
 ## Build
 
-1. To build this plugin you will need [.Net 5.x](https://dotnet.microsoft.com/download/dotnet/5.0).
+Install the .NET 9 SDK, then run:
 
-2. Build plugin with following command
-  ```
-  dotnet publish --configuration Release --output bin
-  ```
+```bash
+dotnet build AutoOrganize.sln -c Release
+```
 
-3. Place the dll-file in the `plugins/autoorganize` folder (you might need to create the folders) of your JF install
+The plugin DLL is generated under `AutoOrganize/bin/Release/net9.0/`.
 
-## Releasing
+Run the regression suite with:
 
-To release the plugin we recommend [JPRM](https://github.com/oddstr13/jellyfin-plugin-repository-manager) that will build and package the plugin.
-For additional context and for how to add the packaged plugin zip to a plugin manifest see the [JPRM documentation](https://github.com/oddstr13/jellyfin-plugin-repository-manager) for more info.
+```bash
+dotnet run --project AutoOrganize.Tests/AutoOrganize.Tests.csproj -c Release
+```
 
-## Contributing
+See `VALIDATION.md` for the completed release checks and remaining runtime caveat.
 
-We welcome all contributions and pull requests! If you have a larger feature in mind please open an issue so we can discuss the implementation before you start.
-In general refer to our [contributing guidelines](https://github.com/jellyfin/.github/blob/master/CONTRIBUTING.md) for further information.
+## Installation
 
-## Licence
-
-This plugins code and packages are distributed under the MIT License. See [LICENSE](./LICENSE) for more information.
+Create an Auto Organize plugin directory under Jellyfin's plugin data directory, copy `AutoOrganize.dll` into it, and restart Jellyfin. Back up the Jellyfin configuration and media library before first use, then test with copy mode and a small watch folder before enabling moves or overwrites.
