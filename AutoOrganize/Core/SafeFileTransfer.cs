@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Emby.Naming.Common;
 using Lingua;
 
 namespace AutoOrganize.Core;
@@ -12,6 +13,7 @@ namespace AutoOrganize.Core;
 internal static class SafeFileTransfer
 {
 	private const int CopyBufferSize = 131072;
+	private static readonly NamingOptions DefaultNamingOptions = new NamingOptions();
 	private static readonly HashSet<string> SubtitleExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 	{
 		".srt",
@@ -34,6 +36,17 @@ internal static class SafeFileTransfer
 	public static bool IsSubtitleFile(string path)
 	{
 		return SubtitleExtensions.Contains(Path.GetExtension(path));
+	}
+
+	public static bool IsLikelyVideoFile(string path)
+	{
+		return IsLikelyVideoFile(path, DefaultNamingOptions);
+	}
+
+	public static bool IsLikelyVideoFile(string path, NamingOptions namingOptions)
+	{
+		ArgumentNullException.ThrowIfNull(namingOptions);
+		return namingOptions.VideoFileExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
 	}
 
 	public static string GetSubtitleTargetPath(string sourceSubtitlePath, string targetMediaPath, string? sourceMediaPath = null)

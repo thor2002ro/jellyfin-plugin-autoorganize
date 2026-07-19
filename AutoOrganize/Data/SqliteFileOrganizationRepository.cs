@@ -26,7 +26,7 @@ public sealed class SqliteFileOrganizationRepository : IFileOrganizationReposito
 
 	private const string DatabaseDateTimeFormat = "yyyy-MM-dd HH:mm:ss.FFFFFFFK";
 
-	private const string FileResultColumns = "ResultId, OriginalPath, TargetPath, FileLength, OrganizationDate, Status, OrganizationType, StatusMessage, ExtractedName, ExtractedYear, ExtractedSeasonNumber, ExtractedEpisodeNumber, ExtractedEndingEpisodeNumber, DuplicatePaths";
+	private const string FileResultColumns = "ResultId, OriginalPath, TargetPath, FileLength, OrganizationDate, Status, OrganizationType, StatusMessage, ExtractedName, ExtractedYear, ExtractedSeasonNumber, ExtractedEpisodeNumber, ExtractedEndingEpisodeNumber, DuplicatePaths, BundleItems";
 
 	private const string SmartMatchColumns = "Id, ItemName, DisplayName, OrganizerType, MatchStrings";
 
@@ -96,7 +96,7 @@ public sealed class SqliteFileOrganizationRepository : IFileOrganizationReposito
 		{
 			using SqliteCommand sqliteCommand = connection.CreateCommand();
 			sqliteCommand.Transaction = transaction;
-			sqliteCommand.CommandText = "INSERT INTO FileOrganizerResults\n    (ResultId, OriginalPath, TargetPath, FileLength, OrganizationDate, Status, OrganizationType,\n     StatusMessage, ExtractedName, ExtractedYear, ExtractedSeasonNumber, ExtractedEpisodeNumber,\n     ExtractedEndingEpisodeNumber, DuplicatePaths)\nVALUES\n    ($ResultId, $OriginalPath, $TargetPath, $FileLength, $OrganizationDate, $Status, $OrganizationType,\n     $StatusMessage, $ExtractedName, $ExtractedYear, $ExtractedSeasonNumber, $ExtractedEpisodeNumber,\n     $ExtractedEndingEpisodeNumber, $DuplicatePaths)\nON CONFLICT(ResultId) DO UPDATE SET\n    OriginalPath = excluded.OriginalPath,\n    TargetPath = excluded.TargetPath,\n    FileLength = excluded.FileLength,\n    OrganizationDate = excluded.OrganizationDate,\n    Status = excluded.Status,\n    OrganizationType = excluded.OrganizationType,\n    StatusMessage = excluded.StatusMessage,\n    ExtractedName = excluded.ExtractedName,\n    ExtractedYear = excluded.ExtractedYear,\n    ExtractedSeasonNumber = excluded.ExtractedSeasonNumber,\n    ExtractedEpisodeNumber = excluded.ExtractedEpisodeNumber,\n    ExtractedEndingEpisodeNumber = excluded.ExtractedEndingEpisodeNumber,\n    DuplicatePaths = excluded.DuplicatePaths;";
+			sqliteCommand.CommandText = "INSERT INTO FileOrganizerResults\n    (ResultId, OriginalPath, TargetPath, FileLength, OrganizationDate, Status, OrganizationType,\n     StatusMessage, ExtractedName, ExtractedYear, ExtractedSeasonNumber, ExtractedEpisodeNumber,\n     ExtractedEndingEpisodeNumber, DuplicatePaths, BundleItems)\nVALUES\n    ($ResultId, $OriginalPath, $TargetPath, $FileLength, $OrganizationDate, $Status, $OrganizationType,\n     $StatusMessage, $ExtractedName, $ExtractedYear, $ExtractedSeasonNumber, $ExtractedEpisodeNumber,\n     $ExtractedEndingEpisodeNumber, $DuplicatePaths, $BundleItems)\nON CONFLICT(ResultId) DO UPDATE SET\n    OriginalPath = excluded.OriginalPath,\n    TargetPath = excluded.TargetPath,\n    FileLength = excluded.FileLength,\n    OrganizationDate = excluded.OrganizationDate,\n    Status = excluded.Status,\n    OrganizationType = excluded.OrganizationType,\n    StatusMessage = excluded.StatusMessage,\n    ExtractedName = excluded.ExtractedName,\n    ExtractedYear = excluded.ExtractedYear,\n    ExtractedSeasonNumber = excluded.ExtractedSeasonNumber,\n    ExtractedEpisodeNumber = excluded.ExtractedEpisodeNumber,\n    ExtractedEndingEpisodeNumber = excluded.ExtractedEndingEpisodeNumber,\n    DuplicatePaths = excluded.DuplicatePaths,\n    BundleItems = excluded.BundleItems;";
 			AddParameter(sqliteCommand, "$ResultId", id.ToByteArray());
 			AddParameter(sqliteCommand, "$OriginalPath", result.OriginalPath);
 			AddParameter(sqliteCommand, "$TargetPath", result.TargetPath);
@@ -111,6 +111,7 @@ public sealed class SqliteFileOrganizationRepository : IFileOrganizationReposito
 			AddParameter(sqliteCommand, "$ExtractedEpisodeNumber", result.ExtractedEpisodeNumber);
 			AddParameter(sqliteCommand, "$ExtractedEndingEpisodeNumber", result.ExtractedEndingEpisodeNumber);
 			AddParameter(sqliteCommand, "$DuplicatePaths", JsonSerializer.Serialize(result.DuplicatePaths ?? Array.Empty<string>()));
+			AddParameter(sqliteCommand, "$BundleItems", JsonSerializer.Serialize(result.BundleItems ?? Array.Empty<FileOrganizationBundleItem>()));
 			sqliteCommand.ExecuteNonQuery();
 		}, cancellationToken);
 	}
@@ -133,7 +134,7 @@ public sealed class SqliteFileOrganizationRepository : IFileOrganizationReposito
 		Guid guid = ParseGuid(id, "id");
 		using SqliteConnection sqliteConnection = OpenConnection();
 		using SqliteCommand sqliteCommand = sqliteConnection.CreateCommand();
-		sqliteCommand.CommandText = "SELECT ResultId, OriginalPath, TargetPath, FileLength, OrganizationDate, Status, OrganizationType, StatusMessage, ExtractedName, ExtractedYear, ExtractedSeasonNumber, ExtractedEpisodeNumber, ExtractedEndingEpisodeNumber, DuplicatePaths FROM FileOrganizerResults WHERE ResultId = $ResultId LIMIT 1;";
+		sqliteCommand.CommandText = "SELECT " + FileResultColumns + " FROM FileOrganizerResults WHERE ResultId = $ResultId LIMIT 1;";
 		AddParameter(sqliteCommand, "$ResultId", guid.ToByteArray());
 		using SqliteDataReader sqliteDataReader = sqliteCommand.ExecuteReader();
 		FileOrganizationResult? result;
@@ -148,7 +149,7 @@ public sealed class SqliteFileOrganizationRepository : IFileOrganizationReposito
 		List<FileOrganizationResult> list = new List<FileOrganizationResult>();
 		using (SqliteCommand sqliteCommand = sqliteConnection.CreateCommand())
 		{
-			sqliteCommand.CommandText = "SELECT ResultId, OriginalPath, TargetPath, FileLength, OrganizationDate, Status, OrganizationType, StatusMessage, ExtractedName, ExtractedYear, ExtractedSeasonNumber, ExtractedEpisodeNumber, ExtractedEndingEpisodeNumber, DuplicatePaths FROM FileOrganizerResults ORDER BY OrganizationDate DESC, ResultId LIMIT $Limit OFFSET $Offset;";
+			sqliteCommand.CommandText = "SELECT " + FileResultColumns + " FROM FileOrganizerResults ORDER BY OrganizationDate DESC, ResultId LIMIT $Limit OFFSET $Offset;";
 			AddParameter(sqliteCommand, "$Limit", num2);
 			AddParameter(sqliteCommand, "$Offset", num);
 			using SqliteDataReader sqliteDataReader = sqliteCommand.ExecuteReader();
@@ -402,11 +403,22 @@ public sealed class SqliteFileOrganizationRepository : IFileOrganizationReposito
 		using (SqliteCommand versionCommand = sqliteConnection.CreateCommand())
 		{
 			versionCommand.CommandText = "PRAGMA user_version;";
-			if (Convert.ToInt32(versionCommand.ExecuteScalar(), CultureInfo.InvariantCulture) < 2)
+			int userVersion = Convert.ToInt32(versionCommand.ExecuteScalar(), CultureInfo.InvariantCulture);
+			if (!ColumnExists(sqliteConnection, "FileOrganizerResults", "BundleItems"))
+			{
+				versionCommand.CommandText = "ALTER TABLE FileOrganizerResults ADD COLUMN BundleItems TEXT NULL;";
+				versionCommand.ExecuteNonQuery();
+			}
+			if (userVersion < 2)
 			{
 				RemoveMalformedRows(sqliteConnection);
 				MergeDuplicateSmartMatches(sqliteConnection);
-				versionCommand.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS idx_SmartMatch_UniqueItem ON SmartMatch(OrganizerType COLLATE NOCASE, ItemName COLLATE NOCASE); PRAGMA user_version = 2;";
+				versionCommand.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS idx_SmartMatch_UniqueItem ON SmartMatch(OrganizerType COLLATE NOCASE, ItemName COLLATE NOCASE);";
+				versionCommand.ExecuteNonQuery();
+			}
+			if (userVersion < 3)
+			{
+				versionCommand.CommandText = "PRAGMA user_version = 3;";
 				versionCommand.ExecuteNonQuery();
 			}
 		}
@@ -424,13 +436,13 @@ public sealed class SqliteFileOrganizationRepository : IFileOrganizationReposito
 		var malformedFileRows = new List<long>();
 		using (SqliteCommand command = connection.CreateCommand())
 		{
-			command.CommandText = "SELECT ResultId, OriginalPath, TargetPath, FileLength, OrganizationDate, Status, OrganizationType, StatusMessage, ExtractedName, ExtractedYear, ExtractedSeasonNumber, ExtractedEpisodeNumber, ExtractedEndingEpisodeNumber, DuplicatePaths, rowid FROM FileOrganizerResults;";
+			command.CommandText = "SELECT " + FileResultColumns + ", rowid FROM FileOrganizerResults;";
 			using SqliteDataReader reader = command.ExecuteReader();
 			while (reader.Read())
 			{
 				if (!TryReadFileResult(reader, out _))
 				{
-					malformedFileRows.Add(reader.GetInt64(14));
+					malformedFileRows.Add(reader.GetInt64(15));
 				}
 			}
 		}
@@ -469,6 +481,21 @@ public sealed class SqliteFileOrganizationRepository : IFileOrganizationReposito
 			parameter.Value = rowId;
 			command.ExecuteNonQuery();
 		}
+	}
+
+	private static bool ColumnExists(SqliteConnection connection, string table, string column)
+	{
+		using SqliteCommand command = connection.CreateCommand();
+		command.CommandText = "PRAGMA table_info(" + table + ");";
+		using SqliteDataReader reader = command.ExecuteReader();
+		while (reader.Read())
+		{
+			if (string.Equals(Convert.ToString(reader["name"], CultureInfo.InvariantCulture), column, StringComparison.OrdinalIgnoreCase))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private void MergeDuplicateSmartMatches(SqliteConnection connection)
@@ -622,7 +649,8 @@ public sealed class SqliteFileOrganizationRepository : IFileOrganizationReposito
 			ExtractedSeasonNumber = GetNullableInt32(reader, 10),
 			ExtractedEpisodeNumber = GetNullableInt32(reader, 11),
 			ExtractedEndingEpisodeNumber = GetNullableInt32(reader, 12),
-			DuplicatePaths = ReadDuplicatePaths(GetNullableString(reader, 13))
+			DuplicatePaths = ReadDuplicatePaths(GetNullableString(reader, 13)),
+			BundleItems = ReadBundleItems(GetNullableString(reader, 14))
 		};
 	}
 
@@ -672,6 +700,26 @@ public sealed class SqliteFileOrganizationRepository : IFileOrganizationReposito
 			}
 		}
 		return value.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+	}
+
+	private IReadOnlyList<FileOrganizationBundleItem> ReadBundleItems(string? value)
+	{
+		if (string.IsNullOrWhiteSpace(value))
+		{
+			return Array.Empty<FileOrganizationBundleItem>();
+		}
+		try
+		{
+			return JsonSerializer.Deserialize<List<FileOrganizationBundleItem>>(value)?
+				.Where(item => item != null && !string.IsNullOrWhiteSpace(item.SourcePath))
+				.ToList()
+				?? new List<FileOrganizationBundleItem>();
+		}
+		catch (JsonException exception)
+		{
+			_logger.LogWarning(exception, "Ignoring malformed bundle-item JSON");
+			return Array.Empty<FileOrganizationBundleItem>();
+		}
 	}
 
 	private string BackupCorruptDatabase()

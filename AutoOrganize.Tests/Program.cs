@@ -11,7 +11,12 @@ using System.Threading.Tasks;
 using AutoOrganize.Core;
 using AutoOrganize.Data;
 using AutoOrganize.Model;
+using Emby.Naming.Common;
+using Emby.Naming.TV;
+using Emby.Naming.Video;
+using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Dto;
+using MediaBrowser.Model.Entities;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -232,6 +237,54 @@ internal static class Program
             };
             Equal("%mn (%my).%ext", OrganizationOptionResolver.GetMoviePattern(options));
         });
+        Add("TV single file parser extracts show season and episode", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string path = Path.Combine(temporary.Path, "The.Show.S02E04.1080p.WEB-DL.mkv");
+            File.WriteAllText(path, string.Empty);
+
+            EpisodeInfo info = new EpisodeResolver(new NamingOptions()).Resolve(path, isDirectory: false)
+                ?? throw new InvalidOperationException("TV episode was not parsed.");
+            Equal("The.Show", info.SeriesName);
+            Equal(2, info.SeasonNumber);
+            Equal(4, info.EpisodeNumber);
+        });
+        Add("movie single file parser extracts name and year", () =>
+        {
+            VideoFileInfo info = VideoResolver.Resolve("Avatar.2009.2160p.WEB-DL.mkv", isDirectory: false, new NamingOptions())
+                ?? throw new InvalidOperationException("Movie was not parsed.");
+            Equal("Avatar", info.Name);
+            Equal(2009, info.Year);
+        });
+        Add("movie directory parser keeps separate movie identities", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string first = Path.Combine(temporary.Path, "Avatar.2009.2160p.mkv");
+            string second = Path.Combine(temporary.Path, "Aliens.1986.1080p.mkv");
+            File.WriteAllText(first, string.Empty);
+            File.WriteAllText(second, string.Empty);
+
+            string[] names = new[] { first, second }
+                .Select(path => VideoResolver.Resolve(path, isDirectory: false, new NamingOptions())?.Name ?? string.Empty)
+                .ToArray();
+            SequenceEqual(new[] { "Avatar", "Aliens" }, names);
+        });
+        Add("movie directory parser ignores non-video sidecars", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string movie = Path.Combine(temporary.Path, "Avatar.2009.mkv");
+            string subtitle = Path.Combine(temporary.Path, "Avatar.2009.eng.srt");
+            string metadata = Path.Combine(temporary.Path, "Avatar.2009.nfo");
+            File.WriteAllText(movie, string.Empty);
+            File.WriteAllText(subtitle, string.Empty);
+            File.WriteAllText(metadata, string.Empty);
+
+            string[] videos = Directory.GetFiles(temporary.Path)
+                .Where(SafeFileTransfer.IsLikelyVideoFile)
+                .ToArray();
+            Equal(1, videos.Length);
+            Equal(movie, videos[0]);
+        });
         Add("flat series layout is retained by default", () =>
         {
             var options = new TvFileOrganizationOptions { AlwaysCreateSeasonFolders = false };
@@ -241,6 +294,264 @@ internal static class Program
         {
             var options = new TvFileOrganizationOptions { AlwaysCreateSeasonFolders = true };
             False(OrganizationOptionResolver.ShouldUseSeriesRoot(options, containsFlatEpisodes: true));
+        });
+        Add("TV season directory detection uses first middle and last video", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string season = Path.Combine(temporary.Path, "incoming");
+            Directory.CreateDirectory(season);
+            string first = Path.Combine(season, "The.Show.S02E01.mkv");
+            string middle = Path.Combine(season, "The.Show.S02E05.mkv");
+            string ignored = Path.Combine(season, "notes.txt");
+            string last = Path.Combine(season, "The.Show.S02E10.mkv");
+            File.WriteAllText(first, string.Empty);
+            File.WriteAllText(ignored, string.Empty);
+            File.WriteAllText(middle, string.Empty);
+            File.WriteAllText(last, string.Empty);
+
+            EpisodeFileOrganizer.SeasonDirectoryInfo? info = EpisodeFileOrganizer.TryResolveSeasonDirectoryInfo(new[] { ignored, middle, last, first }, new NamingOptions());
+
+            True(info.HasValue);
+            EpisodeFileOrganizer.SeasonDirectoryInfo value = info.GetValueOrDefault();
+            Equal("The.Show", value.SeriesName);
+            Equal(2, value.SeasonNumber);
+            Equal(1, value.FirstEpisodeNumber);
+            Equal(10, value.LastEpisodeNumber);
+        });
+        Add("TV season directory detection rejects mixed middle show", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string season = Path.Combine(temporary.Path, "incoming");
+            Directory.CreateDirectory(season);
+            string first = Path.Combine(season, "A.Show.S02E01.mkv");
+            string middle = Path.Combine(season, "B.Show.S02E05.mkv");
+            string last = Path.Combine(season, "A.Show.S02E10.mkv");
+            File.WriteAllText(first, string.Empty);
+            File.WriteAllText(middle, string.Empty);
+            File.WriteAllText(last, string.Empty);
+
+            Equal<EpisodeFileOrganizer.SeasonDirectoryInfo?>(null, EpisodeFileOrganizer.TryResolveSeasonDirectoryInfo(new[] { first, middle, last }, new NamingOptions()));
+        });
+        Add("TV season directory detection rejects mixed seasons", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string season = Path.Combine(temporary.Path, "incoming");
+            Directory.CreateDirectory(season);
+            string first = Path.Combine(season, "The.Show.S02E01.mkv");
+            string last = Path.Combine(season, "The.Show.S03E01.mkv");
+            File.WriteAllText(first, string.Empty);
+            File.WriteAllText(last, string.Empty);
+
+            Equal<EpisodeFileOrganizer.SeasonDirectoryInfo?>(null, EpisodeFileOrganizer.TryResolveSeasonDirectoryInfo(new[] { first, last }, new NamingOptions()));
+        });
+        Add("TV season directory detection rejects mixed movie and episode files", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string season = Path.Combine(temporary.Path, "incoming");
+            Directory.CreateDirectory(season);
+            string episode = Path.Combine(season, "The.Show.S02E01.mkv");
+            string movie = Path.Combine(season, "Avatar.2009.mkv");
+            string last = Path.Combine(season, "The.Show.S02E10.mkv");
+            File.WriteAllText(episode, string.Empty);
+            File.WriteAllText(movie, string.Empty);
+            File.WriteAllText(last, string.Empty);
+
+            Equal<EpisodeFileOrganizer.SeasonDirectoryInfo?>(null, EpisodeFileOrganizer.TryResolveSeasonDirectoryInfo(new[] { episode, movie, last }, new NamingOptions()));
+        });
+        Add("TV season directory detection accepts non-mixed season with sidecars", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string season = Path.Combine(temporary.Path, "incoming");
+            Directory.CreateDirectory(season);
+            string first = Path.Combine(season, "The.Show.S03E01.mkv");
+            string subtitle = Path.Combine(season, "The.Show.S03E01.eng.srt");
+            string last = Path.Combine(season, "The.Show.S03E08.mkv");
+            File.WriteAllText(first, string.Empty);
+            File.WriteAllText(subtitle, string.Empty);
+            File.WriteAllText(last, string.Empty);
+
+            EpisodeFileOrganizer.SeasonDirectoryInfo? info = EpisodeFileOrganizer.TryResolveSeasonDirectoryInfo(new[] { first, subtitle, last }, new NamingOptions());
+            True(info.HasValue);
+            Equal("The.Show", info.GetValueOrDefault().SeriesName);
+            Equal(3, info.GetValueOrDefault().SeasonNumber);
+        });
+        Add("TV new season directory samples three files and bundles whole directory", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string season = Path.Combine(temporary.Path, "incoming");
+            Directory.CreateDirectory(season);
+            string first = Path.Combine(season, "The.Show.S04E01.mkv");
+            string middle = Path.Combine(season, "The.Show.S04E05.mkv");
+            string last = Path.Combine(season, "The.Show.S04E10.mkv");
+            string subtitle = Path.Combine(season, "The.Show.S04E05.eng.srt");
+            File.WriteAllText(first, string.Empty);
+            File.WriteAllText(middle, string.Empty);
+            File.WriteAllText(last, string.Empty);
+            File.WriteAllText(subtitle, string.Empty);
+
+            EpisodeFileOrganizer.SeasonDirectoryInfo? info = EpisodeFileOrganizer.TryResolveSeasonDirectoryInfo(new[] { first, middle, subtitle, last }, new NamingOptions());
+            True(info.HasValue);
+            Equal("The.Show", info.GetValueOrDefault().SeriesName);
+            Equal(4, info.GetValueOrDefault().SeasonNumber);
+            Equal(1, info.GetValueOrDefault().FirstEpisodeNumber);
+            Equal(10, info.GetValueOrDefault().LastEpisodeNumber);
+
+            string source = File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Core", "EpisodeFileOrganizer.cs"));
+            Contains("videoPaths[0]", source);
+            Contains("videoPaths[videoPaths.Count / 2]", source);
+            Contains("videoPaths[videoPaths.Count - 1]", source);
+            Contains("GetSeasonBundleItems(files, series", source);
+            Contains("GetSeasonBundleTargetPath", source);
+        });
+        Add("TV season bundle preview reuses confirmed series", () =>
+        {
+            string source = File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Core", "EpisodeFileOrganizer.cs"));
+            Contains("GetSeasonBundleItems(files, series, options", source);
+            Contains("CreatePendingSeries(seriesName, seriesYear, options)", source);
+            Contains("GetMetadataSeriesDirectoryName(series)", source);
+            Contains("NameUtils.EnsureTerminalYear(name.Trim(), series.ProductionYear)", source);
+            Contains("UseMetadataSeriesPathUnlessExistingSeasonFolders(series, options)", source);
+            Contains("HasExistingSeasonFolders(series)", source);
+            Contains("_fileSystem.DirectoryExists(series.Path)", source);
+            Contains("_fileSystem.DirectoryExists(season.Path)", source);
+            Contains("bool hasPath = !string.IsNullOrWhiteSpace(season.Path) && _fileSystem.DirectoryExists(season.Path)", source);
+            Contains("!PathSafety.AreSame(season.Path, series.Path)", source);
+            Contains("CreatePendingEpisode(series, seasonNumber, episodeNumber", source);
+            False(source.Contains("PreviewEpisodeFile", StringComparison.Ordinal));
+            False(source.Contains("saveResult: false", StringComparison.Ordinal));
+            Contains("if (saveResult && !_organizationService.AddToInProgressList", source);
+        });
+        Add("detection scans metadata before approval and approval uses stored targets", () =>
+        {
+            string episodeSource = File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Core", "EpisodeFileOrganizer.cs"));
+            Contains("AutoDetectSeries(seriesName, seriesYear, options, updateLibrary: false", episodeSource);
+            Contains("AutoDetectSeries(seriesName, seriesYear, options, updateLibrary: !requireApproval", episodeSource);
+            Contains("SeriesSearchProviders = { \"TVmaze\" }", episodeSource);
+            Contains("LibraryProviderResolver.GetMetadataProviders(_libraryManager, options.DefaultSeriesLibraryPath, nameof(Series), SeriesSearchProviders)", episodeSource);
+            Contains("LibraryProviderResolver.GetMetadataProviders(_libraryManager, options.DefaultSeriesLibraryPath, nameof(Episode), SeriesSearchProviders)", episodeSource);
+            Contains("SearchProviderName = providerName", episodeSource);
+            string movieSource = File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Core", "MovieFileOrganizer.cs"));
+            Contains("AutoDetectMovie(movieName, movieYear, result, options, cancellationToken)", movieSource);
+            Contains("MovieSearchProviders = { \"The Open Movie Database\", \"TheMovieDb\" }", movieSource);
+            Contains("LibraryProviderResolver.GetMetadataProviders(_libraryManager, options.DefaultMovieLibraryPath, nameof(Movie), MovieSearchProviders)", movieSource);
+            Contains("SearchProviderName = providerName", movieSource);
+            string providerSource = File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Core", "LibraryProviderResolver.cs"));
+            Contains("MetadataFetchers", providerSource);
+            Contains("MetadataFetcherOrder", providerSource);
+            Contains("typeOptions?.MetadataFetchers is { Length: 0 }", providerSource);
+            Contains("return Array.Empty<string>();", providerSource);
+            False(providerSource.Contains("EnableInternetProviders", StringComparison.Ordinal));
+            string serviceSource = File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Core", "FileOrganizationService.cs"));
+            Contains("OrganizeDetectedFileToStoredTarget", serviceSource);
+            Contains("RefreshMetadata(string resultId", serviceSource);
+            Contains("RefreshTvSeasonBundleMetadata", serviceSource);
+            Contains("Metadata/Refresh", File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Api", "FileOrganizationController.cs")));
+            Contains("IsSameDetectedResult", File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Core", "EpisodeFileOrganizer.cs")));
+            Contains("IsSameDetectedResult", File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Core", "MovieFileOrganizer.cs")));
+        });
+        Add("library provider resolver honors enabled fetchers", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string libraryRoot = Path.Combine(temporary.Path, "tv");
+            var folders = new[]
+            {
+                new VirtualFolderInfo
+                {
+                    Locations = new[] { libraryRoot },
+                    LibraryOptions = new LibraryOptions
+                    {
+                        TypeOptions = new[]
+                        {
+                            new TypeOptions
+                            {
+                                Type = "Series",
+                                MetadataFetchers = new[] { "TVmaze", "TheMovieDb" },
+                                MetadataFetcherOrder = new[] { "DisabledProvider", "TheMovieDb", "TVmaze" }
+                            },
+                            new TypeOptions
+                            {
+                                Type = "Episode",
+                                MetadataFetchers = Array.Empty<string>(),
+                                MetadataFetcherOrder = new[] { "TVmaze" }
+                            }
+                        }
+                    }
+                }
+            };
+
+            SequenceEqual(
+                new[] { "TheMovieDb", "TVmaze" },
+                LibraryProviderResolver.GetMetadataProviders(folders, libraryRoot, "Series", new[] { "Fallback" }));
+            SequenceEqual(
+                Array.Empty<string>(),
+                LibraryProviderResolver.GetMetadataProviders(folders, libraryRoot, "Episode", new[] { "Fallback" }));
+            SequenceEqual(
+                new[] { "Fallback" },
+                LibraryProviderResolver.GetMetadataProviders(folders, libraryRoot, "Movie", new[] { "Fallback" }));
+        });
+        Add("TV season bundle approval uses stored file list", () =>
+        {
+            string source = File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Core", "FileOrganizationService.cs"));
+            Contains("fileOrganizationResult.BundleItems", source);
+            False(source.Contains("_fileSystem.DirectoryExists(fileOrganizationResult.OriginalPath) && fileOrganizationResult.BundleItems.Count > 0", StringComparison.Ordinal));
+            False(source.Contains("_fileSystem.DirectoryExists(result.OriginalPath) && result.BundleItems.Count > 0", StringComparison.Ordinal));
+            Contains("_fileSystem.DirectoryExists(fileOrganizationResult.OriginalPath)", source);
+            Contains("_fileSystem.DirectoryExists(result.OriginalPath)", source);
+            Contains("approvedBundleItems", source);
+            Contains("AddToInProgressList(fileOrganizationResult, fullClientRefresh: false)", source);
+            Contains("RemoveFromInprogressList(fileOrganizationResult)", source);
+            Contains("OrganizeTvSeasonDirectory(fileOrganizationResult.OriginalPath, autoOrganizeOptions.TvOptions, approvedBundleItems", source);
+            Contains("OrganizeDetectedFileToStoredTarget", source);
+            Contains("SafeFileTransfer.TransferAsync(result.OriginalPath, result.TargetPath!", source);
+            Contains("ShouldCleanApprovedSource(fileOrganizationResult2, autoOrganizeOptions)", source);
+            Contains("CleanApprovedSource(fileOrganizationResult2.OriginalPath, fileOrganizationResult2.Type, autoOrganizeOptions, cancellationToken)", source);
+            Contains("ShouldCleanApprovedSource(result, options)", source);
+            Contains("CleanApprovedSource(result.OriginalPath, result.Type, options, cancellationToken)", source);
+            Contains("fileOrganizationResult.Type = FileOrganizerType.Episode;", source);
+            Contains("fileOrganizationResult.Type = FileOrganizerType.Movie;", source);
+            Contains("ShouldCleanApprovedSource(fileOrganizationResult, autoOrganizeOptions)", source);
+            Contains("EnsureResultSourcePathIsAuthorized(request.ResultId);", source);
+            Contains("private void EnsureResultSourcePathIsAuthorized", source);
+            Contains("CleanApprovedSource(fileOrganizationResult.OriginalPath, FileOrganizerType.Episode, autoOrganizeOptions, cancellationToken)", source);
+            Contains("CleanApprovedSource(fileOrganizationResult.OriginalPath, FileOrganizerType.Movie, autoOrganizeOptions, cancellationToken)", source);
+            Contains("private static bool WasMoved", source);
+            Contains("private static bool ShouldCleanApprovedSource", source);
+            Contains("!PathSafety.AreSame(result.OriginalPath, result.TargetPath)", source);
+            Contains("private void CleanApprovedSource", source);
+            string folderSource = File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Core", "FolderOrganizer.cs"));
+            Contains("Approved bundle no longer contains any approved files.", folderSource);
+            Contains("OrganizeApprovedBundle(path, approvedBundleItems", folderSource);
+            Contains("if (approvedBundleItems != null)", folderSource);
+            Contains("RefreshTvSeasonBundleMetadata", folderSource);
+            Contains("SafeFileTransfer.TransferSingleAsync(item.SourcePath, item.TargetPath", folderSource);
+            Contains("watchLocations.FirstOrDefault(root => PathSafety.IsSameOrSubPath(root, item.SourcePath))", folderSource);
+            Contains("PathSafety.TraversesSymbolicLink(sourceRoot, item.SourcePath)", folderSource);
+            Contains("var movedSourcePaths = new List<string>();", folderSource);
+            Contains("movedSourcePaths.Add(item.SourcePath);", folderSource);
+            Contains("CleanApprovedSources(movedSourcePaths, options.WatchLocations, options.DeleteEmptyFolders, options.LeftOverFileExtensionsToDelete, \"TV\", cancellationToken);", folderSource);
+            Contains("public void CleanApprovedSources", folderSource);
+            Contains("ArgumentNullException.ThrowIfNull(sourcePaths);", folderSource);
+            Contains("private static List<string> GetDeleteExtensions", folderSource);
+            Contains("MergeSeasonBundles(detectedResults)", folderSource);
+            Contains("Detected {seasons.Count} season(s)", folderSource);
+            Contains("GetBundleTargetRoot(result) ?? Path.GetDirectoryName(result.OriginalPath)", folderSource);
+            Contains("Path.GetDirectoryName(result.TargetPath)", folderSource);
+            Contains("GetMergedBundleItemTargetPath(items)", folderSource);
+            Contains("private static string? GetMergedBundleItemTargetPath", folderSource);
+            Contains("progress.Report(1 + 9.0 * (groupIndex + 1) / directoryGroups.Count)", folderSource);
+            Contains("_logger.LogInformation(\"AutoOrganize: {Message}\", message);", folderSource);
+            Contains("Jellyfin logs: AutoOrganize", folderSource);
+            False(folderSource.Contains("File.AppendAllText", StringComparison.Ordinal));
+            False(folderSource.Contains("Directory.CreateDirectory(_logDirectoryPath)", StringComparison.Ordinal));
+            Contains("public bool IsLogged => true;", File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Core", "OrganizerScheduledTask.cs")));
+            Contains("SeasonNumber", File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Model", "FileOrganizationResult.cs")));
+            Contains("DeleteBundledFileResults(result", folderSource);
+            Contains("_organizationService.GetResultBySourcePath(sourcePath)", folderSource);
+            Contains("_organizationService.DeleteResult(existing.Id", folderSource);
+            int deleteIndex = folderSource.IndexOf("DeleteBundledFileResults(result", StringComparison.Ordinal);
+            True(folderSource.LastIndexOf("_organizationService.SaveResult(result, cancellationToken);", deleteIndex, StringComparison.Ordinal) >= 0);
+            Contains("Distinct(PathSafety.PathComparer)", folderSource);
+            Contains("addedSourcePaths", File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Core", "EpisodeFileOrganizer.cs")));
         });
         Add("series root is not used when no flat episodes exist", () =>
         {
@@ -485,6 +796,16 @@ internal static class Program
             True(SafeFileTransfer.IsSidecarFor(Path.Combine("watch", "What If...?.en.srt"), "What If...?"));
             False(SafeFileTransfer.IsSidecarFor(Path.Combine("watch", "What If...X.en.srt"), "What If...?"));
         });
+        Add("video prefilter accepts common videos and rejects junk", () =>
+        {
+            True(SafeFileTransfer.IsLikelyVideoFile("episode.mkv"));
+            True(SafeFileTransfer.IsLikelyVideoFile("episode.m2ts"));
+            True(SafeFileTransfer.IsLikelyVideoFile("episode.mk3d"));
+            True(SafeFileTransfer.IsLikelyVideoFile("episode.rec"));
+            True(SafeFileTransfer.IsLikelyVideoFile("episode.strm"));
+            False(SafeFileTransfer.IsLikelyVideoFile("episode.srt"));
+            False(SafeFileTransfer.IsLikelyVideoFile("episode.nfo"));
+        });
         AddAsync("subtitle sidecar conflict leaves video source in place", async () =>
         {
             using var temporary = new TemporaryDirectory();
@@ -625,6 +946,7 @@ internal static class Program
         });
 
         Add("SQLite repository initializes a new database", RepositoryInitializesDatabase);
+        Add("SQLite repository repairs missing bundle column", RepositoryRepairsMissingBundleColumn);
         Add("SQLite repository round-trips file results", RepositoryRoundTripsFileResults);
         Add("SQLite repository upserts file results", RepositoryUpsertsFileResults);
         Add("SQLite repository applies paging in date order", RepositoryAppliesPaging);
@@ -684,6 +1006,8 @@ internal static class Program
             string source = File.ReadAllText(Path.Combine(ReadRepositoryDirectory(), "AutoOrganize", "Core", "SafeFileTransfer.cs"));
             Contains("detector.UnloadLanguageModels();", source);
             False(source.Contains("static readonly Lazy<LanguageDetector>", StringComparison.Ordinal));
+            False(source.Contains("private static readonly HashSet<string> VideoExtensions", StringComparison.Ordinal));
+            Contains("namingOptions.VideoFileExtensions", source);
             Contains("WithLanguageModelsDirectory(GetBundledLanguageModelsDirectory())", source);
             Contains("typeof(SafeFileTransfer).Assembly.Location", source);
             Contains("AggregateException", source);
@@ -742,6 +1066,8 @@ internal static class Program
             string logScript = ReadResource("AutoOrganize.Web.autoorganizelog.js");
             Contains("btnRetryLog", logScript);
             Contains("btnRefreshLog", ReadResource("AutoOrganize.Web.autoorganizelog.html"));
+            Contains("aoOrganizeLabel", ReadResource("AutoOrganize.Web.autoorganizelog.html"));
+            Contains("aoCancelTask", ReadResource("AutoOrganize.Web.autoorganizelog.html"));
             Contains("btnApproveAll", ReadResource("AutoOrganize.Web.autoorganizelog.html"));
             Contains("btnApproveResult", logScript);
             Contains("btnRejectResult", logScript);
@@ -749,6 +1075,8 @@ internal static class Program
             False(logScript.Contains("material-icons check\">check", StringComparison.Ordinal));
             False(logScript.Contains("material-icons edit\">edit", StringComparison.Ordinal));
             False(logScript.Contains("material-icons close\">close", StringComparison.Ordinal));
+            False(logScript.Contains("material-icons arrow_back\">arrow_back", StringComparison.Ordinal));
+            False(logScript.Contains("material-icons arrow_forward\">arrow_forward", StringComparison.Ordinal));
             Contains("function isSubtitleFile", logScript);
             Contains("&& !isSubtitleFile(item)", logScript);
             Contains("function isDeletable", logScript);
@@ -759,6 +1087,35 @@ internal static class Program
             Contains("item.Type !== 'Log'", logScript);
             Contains("Matched: ", logScript);
             Contains("getMatchedMetadataText", logScript);
+            Contains("refreshOrganizationMetadata", logScript);
+            Contains("btnRefreshMetadata", logScript);
+            Contains("manage_search", logScript);
+            Contains("function isMetadataRefreshable", logScript);
+            Contains("function renderBundleList", logScript);
+            Contains("BundleItems", logScript);
+            Contains("(item.TargetPath || isBundle(item))", logScript);
+            Contains("!item.TargetPath && !isBundle(item)", logScript);
+            Contains("SeasonNumber", logScript);
+            Contains("aoBundleSeason", logScript);
+            Contains("SourcePath", logScript);
+            Contains("TargetPath", logScript);
+            Contains("ScheduledTasks/Running/", logScript);
+            Contains("ScheduledTaskStarted", logScript);
+            Contains("Cancel", logScript);
+            Contains("button.disabled = false;", logScript);
+            Contains("scheduleOrganizeTaskRefresh", logScript);
+            Contains("organizeTaskRefreshRetries", logScript);
+            Contains("running ? 1500 : 1000", logScript);
+            Contains("running ? 20 : organizeTaskRefreshRetries - 1", logScript);
+            Contains("setOrganizeTaskRunning(page, false);", logScript);
+            Contains("organizeTaskId = null;", logScript);
+            Contains("scheduleOrganizeTaskRefresh(view, 1000, 3);", logScript);
+            Contains("scheduleOrganizeTaskRefresh(page, 1000, 2);", logScript);
+            Contains("scheduleOrganizeTaskRefresh(pageGlobal);", logScript);
+            Contains("getScheduledTaskKey", logScript);
+            Contains("isTaskRunning", logScript);
+            Contains("3000", logScript);
+            Contains("setOrganizeTaskRunning", logScript);
             Contains("ApiClient.clearOrganizationLog", logScript);
             Contains("const requestQuery = { ...query }", logScript);
             Contains("generation !== reloadGeneration", logScript);
@@ -815,7 +1172,7 @@ internal static class Program
         connection.Open();
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
-        Equal(2L, Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture));
+        Equal(3L, Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture));
     }
 
     private static void RepositoryRoundTripsFileResults()
@@ -837,6 +1194,21 @@ internal static class Program
         expected.ExtractedEpisodeNumber = 4;
         expected.ExtractedEndingEpisodeNumber = 5;
         expected.DuplicatePaths = new[] { "/library/old-a.mkv", "/library/old-b.mkv" };
+        expected.BundleItems = new[]
+        {
+            new FileOrganizationBundleItem
+            {
+                SourcePath = Path.Combine(temporary.Path, "watch", "The.Show.S02E04.mkv"),
+                TargetPath = Path.Combine(temporary.Path, "library", "The Show", "Season 2", "The Show - S02E04.mkv"),
+                SeasonNumber = 2
+            },
+            new FileOrganizationBundleItem
+            {
+                SourcePath = Path.Combine(temporary.Path, "watch", "The.Show.S02E04.eng.srt"),
+                TargetPath = Path.Combine(temporary.Path, "library", "The Show", "Season 2", "The Show - S02E04.eng.srt"),
+                SeasonNumber = 2
+            }
+        };
         repository.SaveResult(expected, CancellationToken.None);
 
         FileOrganizationResult actual = repository.GetResult(expected.Id)
@@ -856,6 +1228,13 @@ internal static class Program
         Equal(expected.ExtractedEpisodeNumber, actual.ExtractedEpisodeNumber);
         Equal(expected.ExtractedEndingEpisodeNumber, actual.ExtractedEndingEpisodeNumber);
         SequenceEqual(expected.DuplicatePaths, actual.DuplicatePaths);
+        Equal(2, actual.BundleItems.Count);
+        Equal(expected.BundleItems[0].SourcePath, actual.BundleItems[0].SourcePath);
+        Equal(expected.BundleItems[0].TargetPath, actual.BundleItems[0].TargetPath);
+        Equal(expected.BundleItems[0].SeasonNumber, actual.BundleItems[0].SeasonNumber);
+        Equal(expected.BundleItems[1].SourcePath, actual.BundleItems[1].SourcePath);
+        Equal(expected.BundleItems[1].TargetPath, actual.BundleItems[1].TargetPath);
+        Equal(expected.BundleItems[1].SeasonNumber, actual.BundleItems[1].SeasonNumber);
     }
 
     private static void RepositoryUpsertsFileResults()
@@ -962,6 +1341,24 @@ internal static class Program
         SequenceEqual(
             new[] { "The_Show" },
             repository.GetSmartMatch(new FileOrganizationResultQuery()).Items[0].MatchStrings);
+    }
+
+    private static void RepositoryRepairsMissingBundleColumn()
+    {
+        using var temporary = new TemporaryDirectory();
+        string database = Path.Combine(temporary.Path, "repository.db");
+        using (var connection = new SqliteConnection($"Data Source={database}"))
+        {
+            connection.Open();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE FileOrganizerResults (ResultId BLOB PRIMARY KEY, OriginalPath TEXT, TargetPath TEXT, FileLength INTEGER NOT NULL DEFAULT 0, OrganizationDate TEXT NOT NULL, Status TEXT NOT NULL, OrganizationType TEXT NOT NULL, StatusMessage TEXT, ExtractedName TEXT, ExtractedYear INTEGER NULL, ExtractedSeasonNumber INTEGER NULL, ExtractedEpisodeNumber INTEGER NULL, ExtractedEndingEpisodeNumber INTEGER NULL, DuplicatePaths TEXT NULL); PRAGMA user_version = 3;";
+            command.ExecuteNonQuery();
+        }
+
+        using var repository = CreateRepository(database);
+        repository.Initialize();
+        repository.SaveResult(NewFileResult("repaired", DateTime.UtcNow), CancellationToken.None);
+        Equal(1, repository.GetResults(new FileOrganizationResultQuery()).TotalRecordCount);
     }
 
     private static void SmartMatchSavesMergeLogicalDuplicates()

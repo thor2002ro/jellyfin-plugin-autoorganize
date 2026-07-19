@@ -55,8 +55,6 @@ public class OrganizerScheduledTask : IScheduledTask, IConfigurableScheduledTask
 
 	private readonly IFileOrganizationService _fileOrganizationService;
 
-	private readonly IServerApplicationPaths _applicationPaths;
-
 	public string Key => "AutoOrganize";
 
 	public string Name => "Organize new media files";
@@ -80,9 +78,9 @@ public class OrganizerScheduledTask : IScheduledTask, IConfigurableScheduledTask
 		}
 	}
 
-	public bool IsLogged => false;
+	public bool IsLogged => true;
 
-	public OrganizerScheduledTask(ILibraryMonitor libraryMonitor, ILibraryManager libraryManager, ILoggerFactory loggerFactory, IFileSystem fileSystem, IServerConfigurationManager config, IProviderManager providerManager, IFileOrganizationService fileOrganizationService, IServerApplicationPaths applicationPaths)
+	public OrganizerScheduledTask(ILibraryMonitor libraryMonitor, ILibraryManager libraryManager, ILoggerFactory loggerFactory, IFileSystem fileSystem, IServerConfigurationManager config, IProviderManager providerManager, IFileOrganizationService fileOrganizationService)
 	{
 		_libraryMonitor = libraryMonitor;
 		_libraryManager = libraryManager;
@@ -92,7 +90,6 @@ public class OrganizerScheduledTask : IScheduledTask, IConfigurableScheduledTask
 		_config = config;
 		_providerManager = providerManager;
 		_fileOrganizationService = fileOrganizationService;
-		_applicationPaths = applicationPaths;
 		_namingOptions = new NamingOptions();
 	}
 
@@ -109,7 +106,7 @@ public class OrganizerScheduledTask : IScheduledTask, IConfigurableScheduledTask
 			_logger.LogError("TV watch folder {TvWatchFolder} overlaps movie watch folder {MovieWatchFolder}; Auto Organize will not run until the conflict is removed", overlap.Value.Tv, overlap.Value.Movie);
 			throw new InvalidOperationException($"TV watch folder '{overlap.Value.Tv}' overlaps movie watch folder '{overlap.Value.Movie}'.");
 		}
-		var organizer = new FolderOrganizer(_libraryManager, _loggerFactory, _fileSystem, _libraryMonitor, _fileOrganizationService, _providerManager, _namingOptions, _applicationPaths.LogDirectoryPath);
+		var organizer = new FolderOrganizer(_libraryManager, _loggerFactory, _fileSystem, _libraryMonitor, _fileOrganizationService, _providerManager, _namingOptions);
 		IProgress<double> progress2;
 		if (!(isEnabled && organizeMovies))
 		{

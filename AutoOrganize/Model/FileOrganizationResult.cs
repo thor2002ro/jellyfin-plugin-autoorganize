@@ -33,6 +33,8 @@ public class FileOrganizationResult
 
 	public IReadOnlyList<string> DuplicatePaths { get; set; }
 
+	public IReadOnlyList<FileOrganizationBundleItem> BundleItems { get; set; }
+
 	public long FileSize { get; set; }
 
 	public bool IsInProgress { get; set; }
@@ -40,5 +42,15 @@ public class FileOrganizationResult
 	public FileOrganizationResult()
 	{
 		DuplicatePaths = new List<string>();
+		BundleItems = new List<FileOrganizationBundleItem>();
 	}
+}
+
+public class FileOrganizationBundleItem
+{
+	public string SourcePath { get; set; } = string.Empty;
+
+	public string TargetPath { get; set; } = string.Empty;
+
+	public int? SeasonNumber { get; set; }
 }

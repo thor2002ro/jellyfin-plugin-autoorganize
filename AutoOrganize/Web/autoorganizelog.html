@@ -66,6 +66,11 @@
         }
         #libraryFileOrganizerLogPage .organizeTaskPanel.hide { display: none; }
         #libraryFileOrganizerLogPage .organizeTaskPanel .raised { margin: 0; }
+        #libraryFileOrganizerLogPage .btnOrganize.aoCancelTask {
+            border-color: rgba(198, 40, 40, .85);
+            background: #c62828;
+            color: #fff;
+        }
         #libraryFileOrganizerLogPage .organizeProgress { flex: 1 1 12em; min-width: 10em; height: .45em; }
         #libraryFileOrganizerLogPage .aoTableWrap {
             max-width: 100%;
@@ -139,6 +144,23 @@
             opacity: .55;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+        #libraryFileOrganizerLogPage .aoBundleList {
+            margin: .45em 0 0 1.35em;
+            padding: 0;
+            font-size: .8em;
+            opacity: .78;
+        }
+        #libraryFileOrganizerLogPage .aoBundleList li {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #libraryFileOrganizerLogPage .aoBundleSeason {
+            margin-top: .55em;
+            font-size: .78em;
+            font-weight: 600;
+            opacity: .72;
         }
         #libraryFileOrganizerLogPage .aoStatusMessage {
             max-width: 20em;
@@ -232,7 +254,7 @@
             <div class="organizeTaskPanel hide" aria-label="Organizer task controls">
                 <button is="emby-button" type="button" class="btnOrganize raised button-submit">
                     <span class="material-icons play_arrow" aria-hidden="true"></span>
-                    <span>Organize now</span>
+                    <span class="aoOrganizeLabel">Organize now</span>
                 </button>
                 <button is="emby-button" type="button" class="btnApproveAll raised button-submit hide">
                     <span class="material-icons done_all" aria-hidden="true"></span>

@@ -25,6 +25,8 @@ public class MovieFileOrganizer
 {
 	private static readonly object MovieCreationLock = new object();
 
+	private static readonly string[] MovieSearchProviders = { "The Open Movie Database", "TheMovieDb" };
+
 	private readonly ILibraryMonitor _libraryMonitor;
 
 	private readonly ILibraryManager _libraryManager;
@@ -96,7 +98,7 @@ public class MovieFileOrganizer
 				_logger.LogWarning("Unable to determine movie name from {Path}", path);
 			}
 			FileOrganizationResult? resultBySourcePath = _organizationService.GetResultBySourcePath(path);
-			if (resultBySourcePath != null && (result.Type == FileOrganizerType.Unknown || (resultBySourcePath.Status == result.Status && resultBySourcePath.StatusMessage == result.StatusMessage && result.Status != FileSortingStatus.Success)))
+			if (resultBySourcePath != null && (result.Type == FileOrganizerType.Unknown || (IsSameDetectedResult(resultBySourcePath, result) && result.Status != FileSortingStatus.Success)))
 			{
 				return resultBySourcePath;
 			}
@@ -113,6 +115,15 @@ public class MovieFileOrganizer
 		}
 		_organizationService.SaveResult(result, cancellationToken);
 		return result;
+	}
+
+	private static bool IsSameDetectedResult(FileOrganizationResult existing, FileOrganizationResult current)
+	{
+		return existing.Status == current.Status
+			&& existing.StatusMessage == current.StatusMessage
+			&& existing.TargetPath == current.TargetPath
+			&& existing.ExtractedName == current.ExtractedName
+			&& existing.ExtractedYear == current.ExtractedYear;
 	}
 
 	private Movie CreateNewMovie(MovieFileOrganizationRequest request, FileOrganizationResult result, MovieFileOrganizationOptions options)
@@ -205,6 +216,9 @@ public class MovieFileOrganizer
 		if (movie == null)
 		{
 			movie = await AutoDetectMovie(movieName, movieYear, result, options, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+			movie ??= requireApproval && options.AutoDetectMovie
+				? CreatePendingMovie(movieName, movieYear, result, options)
+				: null;
 			if (movie == null)
 			{
 				string statusMessage = "Unable to find movie in library matching name " + movieName;
@@ -348,26 +362,36 @@ public class MovieFileOrganizer
 			: parsedName.Name;
 		IReadOnlyList<RemoteSearchResult> searchResults = Array.Empty<RemoteSearchResult>();
 		string successfulSearchName = nameWithoutYear;
+		IReadOnlyList<string> providerNames = LibraryProviderResolver.GetMetadataProviders(_libraryManager, options.DefaultMovieLibraryPath, nameof(Movie), MovieSearchProviders);
 
 		foreach (string searchName in NameUtils.GetRemoteSearchCandidates(nameWithoutYear))
 		{
-			var searchInfo = new MovieInfo
+			foreach (string providerName in providerNames)
 			{
-				Name = searchName,
-				Year = yearInName
-			};
-			var query = new RemoteSearchQuery<MovieInfo>
-			{
-				SearchInfo = searchInfo
-			};
-			searchResults = (await _providerManager
-				.GetRemoteSearchResults<Movie, MovieInfo>(query, cancellationToken)
-				.ConfigureAwait(false))
-				.ToList();
+				var searchInfo = new MovieInfo
+				{
+					Name = searchName,
+					Year = yearInName
+				};
+				var query = new RemoteSearchQuery<MovieInfo>
+				{
+					SearchInfo = searchInfo,
+					SearchProviderName = providerName
+				};
+				searchResults = (await _providerManager
+					.GetRemoteSearchResults<Movie, MovieInfo>(query, cancellationToken)
+					.ConfigureAwait(false))
+					.ToList();
+
+				if (searchResults.Count > 0)
+				{
+					successfulSearchName = searchName;
+					break;
+				}
+			}
 
 			if (searchResults.Count > 0)
 			{
-				successfulSearchName = searchName;
 				break;
 			}
 		}
@@ -399,6 +423,31 @@ public class MovieFileOrganizer
 			TargetFolder = options.DefaultMovieLibraryPath
 		};
 		return CreateNewMovie(request, result, options);
+	}
+
+	private Movie CreatePendingMovie(string movieName, int? movieYear, FileOrganizationResult result, MovieFileOrganizationOptions options)
+	{
+		ItemLookupInfo parsedName = _libraryManager.ParseName(movieName);
+		string name = string.IsNullOrWhiteSpace(parsedName.Name) ? movieName : parsedName.Name;
+		int? year = parsedName.Year ?? movieYear;
+		var movie = new Movie
+		{
+			Id = Guid.NewGuid(),
+			Name = name,
+			ProductionYear = year,
+			IsInMixedFolder = !options.MovieFolder,
+			ProviderIds = new Dictionary<string, string>()
+		};
+		string moviePath = GetMoviePath(result.OriginalPath, movie, options);
+		if (string.IsNullOrEmpty(moviePath))
+		{
+			throw new OrganizationException("Unable to sort " + result.OriginalPath + " because target path could not be determined.");
+		}
+		movie.Path = Path.Combine(GetAuthorizedLibraryRoot(options.DefaultMovieLibraryPath), moviePath);
+		PathSafety.EnsureWithinLibraryRoots(movie.Path, GetLibraryRoots());
+		result.ExtractedName = name;
+		result.ExtractedYear = year;
+		return movie;
 	}
 
 

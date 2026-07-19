@@ -155,6 +155,43 @@ public class FileOrganizationService : IFileOrganizationService
 		FileOrganizationResult fileOrganizationResult = _repo.GetResult(resultId) ?? throw new OrganizationException("Organization result '" + resultId + "' was not found.");
 		EnsureSourcePathIsAuthorized(fileOrganizationResult.OriginalPath);
 		AutoOrganizeOptions autoOrganizeOptions = _config.GetAutoOrganizeOptions();
+		if (fileOrganizationResult.Type == FileOrganizerType.Episode && _fileSystem.DirectoryExists(fileOrganizationResult.OriginalPath))
+		{
+			IReadOnlyList<FileOrganizationBundleItem> approvedBundleItems = (fileOrganizationResult.BundleItems ?? Array.Empty<FileOrganizationBundleItem>())
+				.Where(item => !string.IsNullOrWhiteSpace(item.SourcePath) && !string.IsNullOrWhiteSpace(item.TargetPath))
+				.ToList();
+			if (!AddToInProgressList(fileOrganizationResult, fullClientRefresh: false))
+			{
+				throw new OrganizationException("Path is currently processed otherwise. Please try again later.");
+			}
+			try
+			{
+				FileOrganizationResult directoryResult = await new FolderOrganizer(_libraryManager, _loggerFactory, _fileSystem, _libraryMonitor, this, _providerManager, _namingOptions)
+					.OrganizeTvSeasonDirectory(fileOrganizationResult.OriginalPath, autoOrganizeOptions.TvOptions, approvedBundleItems, cancellationToken)
+					.ConfigureAwait(false);
+				if (directoryResult.Status != FileSortingStatus.Success)
+				{
+					throw new OrganizationException(directoryResult.StatusMessage ?? "The season directory could not be organized.");
+				}
+				QueueLibraryScanIfNeeded(autoOrganizeOptions.TvOptions.QueueLibraryScan);
+				return;
+			}
+			finally
+			{
+				RemoveFromInprogressList(fileOrganizationResult);
+			}
+		}
+		if (fileOrganizationResult.Status == FileSortingStatus.Detected && !string.IsNullOrWhiteSpace(fileOrganizationResult.TargetPath))
+		{
+			await OrganizeDetectedFileToStoredTarget(fileOrganizationResult, autoOrganizeOptions, cancellationToken).ConfigureAwait(false);
+			QueueLibraryScanIfNeeded(fileOrganizationResult.Type switch
+			{
+				FileOrganizerType.Episode => autoOrganizeOptions.TvOptions.QueueLibraryScan,
+				FileOrganizerType.Movie => autoOrganizeOptions.MovieOptions.QueueLibraryScan,
+				_ => false
+			});
+			return;
+		}
 		FileOrganizationResult fileOrganizationResult2 = fileOrganizationResult.Type switch
 		{
 			FileOrganizerType.Episode when SafeFileTransfer.IsSubtitleFile(fileOrganizationResult.OriginalPath) => await new SubtitleFileOrganizer(this, _fileSystem, _loggerFactory.CreateLogger<SubtitleFileOrganizer>(), _libraryManager, _libraryMonitor, _namingOptions).ApproveEpisodeSubtitleFile(fileOrganizationResult.OriginalPath, autoOrganizeOptions.TvOptions, cancellationToken).ConfigureAwait(continueOnCapturedContext: false),
@@ -167,12 +204,161 @@ public class FileOrganizationService : IFileOrganizationService
 		{
 			throw new OrganizationException(fileOrganizationResult2.StatusMessage ?? "The media file could not be organized.");
 		}
+		if (ShouldCleanApprovedSource(fileOrganizationResult2, autoOrganizeOptions))
+		{
+			CleanApprovedSource(fileOrganizationResult2.OriginalPath, fileOrganizationResult2.Type, autoOrganizeOptions, cancellationToken);
+		}
 		QueueLibraryScanIfNeeded(fileOrganizationResult.Type switch
 		{
 			FileOrganizerType.Episode => autoOrganizeOptions.TvOptions.QueueLibraryScan,
 			FileOrganizerType.Movie => autoOrganizeOptions.MovieOptions.QueueLibraryScan,
 			_ => false
 		});
+	}
+
+	public async Task RefreshMetadata(string resultId, CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		FileOrganizationResult result = _repo.GetResult(resultId) ?? throw new OrganizationException("Organization result '" + resultId + "' was not found.");
+		EnsureSourcePathIsAuthorized(result.OriginalPath);
+		AutoOrganizeOptions options = _config.GetAutoOrganizeOptions();
+		switch (result.Type)
+		{
+			case FileOrganizerType.Episode when _fileSystem.DirectoryExists(result.OriginalPath):
+				if (!AddToInProgressList(result, fullClientRefresh: false))
+				{
+					throw new OrganizationException("Path is currently processed otherwise. Please try again later.");
+				}
+				try
+				{
+					await new FolderOrganizer(_libraryManager, _loggerFactory, _fileSystem, _libraryMonitor, this, _providerManager, _namingOptions)
+						.RefreshTvSeasonBundleMetadata(result, options.TvOptions, cancellationToken)
+						.ConfigureAwait(false);
+				}
+				finally
+				{
+					RemoveFromInprogressList(result);
+				}
+				break;
+			case FileOrganizerType.Episode when SafeFileTransfer.IsSubtitleFile(result.OriginalPath):
+				throw new OrganizationException("Subtitle-only rows do not support metadata refresh.");
+			case FileOrganizerType.Episode:
+				await new EpisodeFileOrganizer(this, _fileSystem, _loggerFactory.CreateLogger<EpisodeFileOrganizer>(), _libraryManager, _libraryMonitor, _providerManager, _namingOptions)
+					.OrganizeEpisodeFile(result.OriginalPath, options.TvOptions, requireApproval: true, cancellationToken)
+					.ConfigureAwait(false);
+				break;
+			case FileOrganizerType.Movie when SafeFileTransfer.IsSubtitleFile(result.OriginalPath):
+				throw new OrganizationException("Subtitle-only rows do not support metadata refresh.");
+			case FileOrganizerType.Movie:
+				await new MovieFileOrganizer(this, _fileSystem, _loggerFactory.CreateLogger<MovieFileOrganizer>(), _libraryManager, _libraryMonitor, _providerManager, _namingOptions)
+					.OrganizeMovieFile(result.OriginalPath, options.MovieOptions, options.MovieOptions.OverwriteExistingFiles, requireApproval: true, cancellationToken)
+					.ConfigureAwait(false);
+				break;
+			default:
+				throw new OrganizationException("Metadata refresh is only supported for TV and movie rows.");
+		}
+	}
+
+	private async Task OrganizeDetectedFileToStoredTarget(FileOrganizationResult result, AutoOrganizeOptions options, CancellationToken cancellationToken)
+	{
+		PathSafety.EnsureWithinLibraryRoots(result.TargetPath!, GetLibraryRoots());
+		bool copySource;
+		bool overwrite;
+		switch (result.Type)
+		{
+			case FileOrganizerType.Episode:
+				copySource = options.TvOptions.CopyOriginalFile;
+				overwrite = options.TvOptions.OverwriteExistingEpisodes;
+				break;
+			case FileOrganizerType.Movie:
+				copySource = options.MovieOptions.CopyOriginalFile;
+				overwrite = options.MovieOptions.OverwriteExistingFiles;
+				break;
+			default:
+				throw new OrganizationException("No organizer exist for the type " + result.Type);
+		}
+		bool isNew = string.IsNullOrWhiteSpace(result.Id);
+		if (!AddToInProgressList(result, isNew))
+		{
+			throw new OrganizationException("Path is currently processed otherwise. Please try again later.");
+		}
+		try
+		{
+			if (PathSafety.AreSame(result.OriginalPath, result.TargetPath!))
+			{
+				result.Status = FileSortingStatus.Success;
+				result.StatusMessage = string.Empty;
+				SaveResult(result, cancellationToken);
+				return;
+			}
+			if (!overwrite && _fileSystem.FileExists(result.TargetPath!))
+			{
+				result.Status = FileSortingStatus.SkippedExisting;
+				result.StatusMessage = $"File '{result.OriginalPath}' already exists as '{result.TargetPath}', stopping organization";
+				SaveResult(result, cancellationToken);
+				return;
+			}
+			_libraryMonitor.ReportFileSystemChangeBeginning(result.TargetPath!);
+			try
+			{
+				if (SafeFileTransfer.IsSubtitleFile(result.OriginalPath))
+				{
+					await SafeFileTransfer.TransferSingleAsync(result.OriginalPath, result.TargetPath!, copySource, overwrite, cancellationToken).ConfigureAwait(false);
+				}
+				else
+				{
+					await SafeFileTransfer.TransferAsync(result.OriginalPath, result.TargetPath!, copySource, overwrite, cancellationToken).ConfigureAwait(false);
+				}
+			}
+			finally
+			{
+				_libraryMonitor.ReportFileSystemChangeComplete(result.TargetPath!, refreshPath: true);
+			}
+			foreach (string duplicatePath in result.DuplicatePaths ?? Array.Empty<string>())
+			{
+				if (PathSafety.IsSafelyWithinAnyRoot(duplicatePath, GetLibraryRoots()) && _fileSystem.FileExists(duplicatePath))
+				{
+					_fileSystem.DeleteFile(duplicatePath);
+				}
+			}
+			if (ShouldCleanApprovedSource(result, options))
+			{
+				CleanApprovedSource(result.OriginalPath, result.Type, options, cancellationToken);
+			}
+			result.Status = FileSortingStatus.Success;
+			result.StatusMessage = string.Empty;
+			SaveResult(result, cancellationToken);
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
+		catch (Exception exception)
+		{
+			result.Status = FileSortingStatus.Failure;
+			result.StatusMessage = exception.Message;
+			_logger.LogError(exception, "Error organizing detected file {OriginalPath} to stored target {TargetPath}", result.OriginalPath, result.TargetPath);
+			SaveResult(result, CancellationToken.None);
+			throw;
+		}
+		finally
+		{
+			RemoveFromInprogressList(result);
+		}
+	}
+
+	private void CleanApprovedSource(string sourcePath, FileOrganizerType type, AutoOrganizeOptions options, CancellationToken cancellationToken)
+	{
+		var organizer = new FolderOrganizer(_libraryManager, _loggerFactory, _fileSystem, _libraryMonitor, this, _providerManager, _namingOptions);
+		switch (type)
+		{
+			case FileOrganizerType.Episode:
+				organizer.CleanApprovedSources(new[] { sourcePath }, options.TvOptions.WatchLocations, options.TvOptions.DeleteEmptyFolders, options.TvOptions.LeftOverFileExtensionsToDelete, "TV", cancellationToken);
+				break;
+			case FileOrganizerType.Movie:
+				organizer.CleanApprovedSources(new[] { sourcePath }, options.MovieOptions.WatchLocations, options.MovieOptions.DeleteEmptyFolders, options.MovieOptions.LeftOverFileExtensionsToDelete, "movie", cancellationToken);
+				break;
+		}
 	}
 
 	public async Task ClearLog(CancellationToken cancellationToken)
@@ -190,12 +376,18 @@ public class FileOrganizationService : IFileOrganizationService
 	public async Task PerformOrganization(EpisodeFileOrganizationRequest request, CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(request, "request");
+		EnsureResultSourcePathIsAuthorized(request.ResultId);
 		EpisodeFileOrganizer episodeFileOrganizer = new EpisodeFileOrganizer(this, _fileSystem, _loggerFactory.CreateLogger<EpisodeFileOrganizer>(), _libraryManager, _libraryMonitor, _providerManager, _namingOptions);
 		AutoOrganizeOptions autoOrganizeOptions = _config.GetAutoOrganizeOptions();
 		FileOrganizationResult fileOrganizationResult = await episodeFileOrganizer.OrganizeWithCorrection(request, autoOrganizeOptions.TvOptions, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+		fileOrganizationResult.Type = FileOrganizerType.Episode;
 		if (fileOrganizationResult.Status != FileSortingStatus.Success)
 		{
 			throw new OrganizationException(fileOrganizationResult.StatusMessage ?? "The episode file could not be organized.");
+		}
+		if (ShouldCleanApprovedSource(fileOrganizationResult, autoOrganizeOptions))
+		{
+			CleanApprovedSource(fileOrganizationResult.OriginalPath, FileOrganizerType.Episode, autoOrganizeOptions, cancellationToken);
 		}
 		QueueLibraryScanIfNeeded(autoOrganizeOptions.TvOptions.QueueLibraryScan);
 	}
@@ -203,14 +395,43 @@ public class FileOrganizationService : IFileOrganizationService
 	public async Task PerformOrganization(MovieFileOrganizationRequest request, CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(request, "request");
+		EnsureResultSourcePathIsAuthorized(request.ResultId);
 		MovieFileOrganizer movieFileOrganizer = new MovieFileOrganizer(this, _fileSystem, _loggerFactory.CreateLogger<MovieFileOrganizer>(), _libraryManager, _libraryMonitor, _providerManager, _namingOptions);
 		AutoOrganizeOptions autoOrganizeOptions = _config.GetAutoOrganizeOptions();
 		FileOrganizationResult fileOrganizationResult = await movieFileOrganizer.OrganizeWithCorrection(request, autoOrganizeOptions.MovieOptions, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+		fileOrganizationResult.Type = FileOrganizerType.Movie;
 		if (fileOrganizationResult.Status != FileSortingStatus.Success)
 		{
 			throw new OrganizationException(fileOrganizationResult.StatusMessage ?? "The movie file could not be organized.");
 		}
+		if (ShouldCleanApprovedSource(fileOrganizationResult, autoOrganizeOptions))
+		{
+			CleanApprovedSource(fileOrganizationResult.OriginalPath, FileOrganizerType.Movie, autoOrganizeOptions, cancellationToken);
+		}
 		QueueLibraryScanIfNeeded(autoOrganizeOptions.MovieOptions.QueueLibraryScan);
+	}
+
+	private static bool WasMoved(FileOrganizationResult result)
+	{
+		return !string.IsNullOrWhiteSpace(result.TargetPath)
+			&& !PathSafety.AreSame(result.OriginalPath, result.TargetPath);
+	}
+
+	private static bool ShouldCleanApprovedSource(FileOrganizationResult result, AutoOrganizeOptions options)
+	{
+		return result.Type switch
+		{
+			FileOrganizerType.Episode => !options.TvOptions.CopyOriginalFile && WasMoved(result),
+			FileOrganizerType.Movie => !options.MovieOptions.CopyOriginalFile && WasMoved(result),
+			_ => false
+		};
+	}
+
+	private void EnsureResultSourcePathIsAuthorized(string? resultId)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(resultId, nameof(resultId));
+		FileOrganizationResult result = _repo.GetResult(resultId) ?? throw new OrganizationException("Organization result '" + resultId + "' was not found.");
+		EnsureSourcePathIsAuthorized(result.OriginalPath);
 	}
 
 	public QueryResult<SmartMatchResult> GetSmartMatchInfos(FileOrganizationResultQuery query)
@@ -280,5 +501,12 @@ public class FileOrganizationService : IFileOrganizationService
 		{
 			_libraryManager.QueueLibraryScan();
 		}
+	}
+
+	private List<string> GetLibraryRoots()
+	{
+		return (from path in _libraryManager.GetVirtualFolders().SelectMany(folder => folder.Locations ?? Array.Empty<string>())
+			where !string.IsNullOrWhiteSpace(path)
+			select path).ToList();
 	}
 }

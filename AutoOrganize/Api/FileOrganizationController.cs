@@ -103,6 +103,26 @@ public class FileOrganizationController : ControllerBase
 		}
 	}
 
+	[HttpPost("{id}/Metadata/Refresh")]
+	[ProducesResponseType(204)]
+	[ProducesResponseType(404)]
+	public async Task<ActionResult> RefreshMetadata([FromRoute] string id, CancellationToken cancellationToken)
+	{
+		if (_fileOrganizationService.GetResult(id) == null)
+		{
+			return NotFound();
+		}
+		try
+		{
+			await _fileOrganizationService.RefreshMetadata(id, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+			return NoContent();
+		}
+		catch (OrganizationException exception)
+		{
+			return OrganizationProblem(exception);
+		}
+	}
+
 	[HttpPost("{id}/Episode/Organize")]
 	[ProducesResponseType(204)]
 	[ProducesResponseType(404)]

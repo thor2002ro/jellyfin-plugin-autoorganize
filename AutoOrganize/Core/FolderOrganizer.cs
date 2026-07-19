@@ -17,8 +17,6 @@ namespace AutoOrganize.Core;
 
 public sealed class FolderOrganizer
 {
-	private static readonly object PluginLogLock = new object();
-
 	private readonly ILibraryMonitor _libraryMonitor;
 	private readonly ILibraryManager _libraryManager;
 	private readonly ILoggerFactory _loggerFactory;
@@ -27,9 +25,8 @@ public sealed class FolderOrganizer
 	private readonly IFileOrganizationService _organizationService;
 	private readonly IProviderManager _providerManager;
 	private readonly NamingOptions _namingOptions;
-	private readonly string? _logDirectoryPath;
 
-	public FolderOrganizer(ILibraryManager libraryManager, ILoggerFactory loggerFactory, IFileSystem fileSystem, ILibraryMonitor libraryMonitor, IFileOrganizationService organizationService, IProviderManager providerManager, NamingOptions namingOptions, string? logDirectoryPath = null)
+	public FolderOrganizer(ILibraryManager libraryManager, ILoggerFactory loggerFactory, IFileSystem fileSystem, ILibraryMonitor libraryMonitor, IFileOrganizationService organizationService, IProviderManager providerManager, NamingOptions namingOptions)
 	{
 		_libraryManager = libraryManager;
 		_loggerFactory = loggerFactory;
@@ -39,7 +36,6 @@ public sealed class FolderOrganizer
 		_organizationService = organizationService;
 		_providerManager = providerManager;
 		_namingOptions = namingOptions;
-		_logDirectoryPath = logDirectoryPath;
 	}
 
 	public Task Organize(TvFileOrganizationOptions options, IProgress<double> progress, CancellationToken cancellationToken)
@@ -57,6 +53,9 @@ public sealed class FolderOrganizer
 			(path, token) => SafeFileTransfer.IsSubtitleFile(path)
 				? subtitleOrganizer.OrganizeEpisodeSubtitleFile(path, options, token)
 				: organizer.OrganizeEpisodeFile(path, options, options.RequireApproval, token),
+			options.RequireApproval
+				? (directory, files, token) => organizer.DetectSeasonDirectory(directory, files, options, token)
+				: null,
 			progress,
 			cancellationToken);
 	}
@@ -76,8 +75,80 @@ public sealed class FolderOrganizer
 			(path, token) => SafeFileTransfer.IsSubtitleFile(path)
 				? subtitleOrganizer.OrganizeMovieSubtitleFile(path, options, token)
 				: organizer.OrganizeMovieFile(path, options, options.OverwriteExistingFiles, options.RequireApproval, token),
+			null,
 			progress,
 			cancellationToken);
+	}
+
+	public Task<FileOrganizationResult> OrganizeTvSeasonDirectory(string path, TvFileOrganizationOptions options, CancellationToken cancellationToken)
+	{
+		return OrganizeTvSeasonDirectory(path, options, approvedBundleItems: null, cancellationToken);
+	}
+
+	public async Task<FileOrganizationResult> OrganizeTvSeasonDirectory(string path, TvFileOrganizationOptions options, IReadOnlyList<FileOrganizationBundleItem>? approvedBundleItems, CancellationToken cancellationToken)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(path);
+		ArgumentNullException.ThrowIfNull(options);
+		if (options.MinFileSizeMb < 0)
+		{
+			throw new ArgumentOutOfRangeException(nameof(options.MinFileSizeMb), "Minimum file size cannot be negative.");
+		}
+		var organizer = new EpisodeFileOrganizer(_organizationService, _fileSystem, _loggerFactory.CreateLogger<EpisodeFileOrganizer>(), _libraryManager, _libraryMonitor, _providerManager, _namingOptions);
+		var subtitleOrganizer = new SubtitleFileOrganizer(_organizationService, _fileSystem, _loggerFactory.CreateLogger<SubtitleFileOrganizer>(), _libraryManager, _libraryMonitor, _namingOptions);
+		long minimumFileSize = (long)options.MinFileSizeMb * 1024 * 1024;
+		if (approvedBundleItems != null)
+		{
+			return await OrganizeApprovedBundle(path, approvedBundleItems, options, cancellationToken).ConfigureAwait(false);
+		}
+		List<FileSystemMetadata> foundFiles = GetFilesToOrganize(path, recursive: false);
+		var videoBaseNames = new HashSet<string>(
+			foundFiles
+				.Where(IsVideoFile)
+				.Select(file => Path.Combine(Path.GetDirectoryName(file.FullName) ?? string.Empty, Path.GetFileNameWithoutExtension(file.FullName))),
+			PathSafety.PathComparer);
+		List<FileSystemMetadata> eligibleFiles = foundFiles
+			.Where(file => CanOrganize(file, minimumFileSize, videoBaseNames))
+			.OrderBy(file => file.FullName, PathSafety.PathComparer)
+			.ToList();
+		var result = new FileOrganizationResult
+		{
+			Date = DateTime.UtcNow,
+			OriginalPath = path,
+			OriginalFileName = Path.GetFileName(Path.TrimEndingDirectorySeparator(path)),
+			Type = FileOrganizerType.Episode,
+			FileSize = eligibleFiles.Sum(file => file.Length)
+		};
+		int succeeded = 0;
+		int skipped = 0;
+		int failed = 0;
+		foreach (FileSystemMetadata file in eligibleFiles)
+		{
+			FileOrganizationResult item = SafeFileTransfer.IsSubtitleFile(file.FullName)
+				? await subtitleOrganizer.ApproveEpisodeSubtitleFile(file.FullName, options, cancellationToken).ConfigureAwait(false)
+				: await organizer.OrganizeEpisodeFile(file.FullName, options, requireApproval: false, cancellationToken).ConfigureAwait(false);
+			result.TargetPath ??= string.IsNullOrWhiteSpace(item.TargetPath) ? null : Path.GetDirectoryName(item.TargetPath);
+			result.ExtractedName ??= item.ExtractedName;
+			result.ExtractedYear ??= item.ExtractedYear;
+			result.ExtractedSeasonNumber ??= item.ExtractedSeasonNumber;
+			switch (item.Status)
+			{
+				case FileSortingStatus.Success:
+					succeeded++;
+					break;
+				case FileSortingStatus.SkippedExisting:
+					skipped++;
+					break;
+				default:
+					failed++;
+					break;
+			}
+		}
+		result.Status = failed == 0 ? FileSortingStatus.Success : FileSortingStatus.Failure;
+		result.StatusMessage = failed == 0
+			? $"Approved bundle. Organized {succeeded}, skipped {skipped}."
+			: $"Approved bundle with {failed} failure(s). Organized {succeeded}, skipped {skipped}.";
+		_organizationService.SaveResult(result, cancellationToken);
+		return result;
 	}
 
 	private async Task Organize(
@@ -88,6 +159,7 @@ public sealed class FolderOrganizer
 		bool extendedClean,
 		IEnumerable<string>? configuredDeleteExtensions,
 		Func<string, CancellationToken, Task<FileOrganizationResult>> organizeFile,
+		Func<string, IReadOnlyList<FileSystemMetadata>, CancellationToken, Task<FileOrganizationResult?>>? detectDirectory,
 		IProgress<double> progress,
 		CancellationToken cancellationToken)
 	{
@@ -133,11 +205,47 @@ public sealed class FolderOrganizer
 			where CanOrganize(file, minimumFileSize, videoBaseNames)
 			select file).ToList();
 		AddPluginLogLine($"{mediaType} scan found {foundFiles.Count} file(s), {eligibleFiles.Count} eligible media/subtitle file(s).");
-		var processedFolders = new HashSet<string>(PathSafety.PathComparer);
 		int succeeded = 0;
 		int detected = 0;
 		int failed = 0;
 		int skipped = 0;
+		var processedFolders = new HashSet<string>(PathSafety.PathComparer);
+		progress.Report(1);
+		if (detectDirectory != null)
+		{
+			var bundledFiles = new HashSet<string>(PathSafety.PathComparer);
+			var detectedResults = new List<FileOrganizationResult>();
+			var directoryGroups = foundFiles
+				.GroupBy(file => Path.GetDirectoryName(file.FullName) ?? string.Empty)
+				.Where(group => !string.IsNullOrWhiteSpace(group.Key))
+				.ToList();
+			for (int groupIndex = 0; groupIndex < directoryGroups.Count; groupIndex++)
+			{
+				var group = directoryGroups[groupIndex];
+				cancellationToken.ThrowIfCancellationRequested();
+				List<FileSystemMetadata> files = group.OrderBy(file => file.FullName, PathSafety.PathComparer).ToList();
+				FileOrganizationResult? result = await detectDirectory(group.Key, files, cancellationToken).ConfigureAwait(false);
+				progress.Report(1 + 9.0 * (groupIndex + 1) / directoryGroups.Count);
+				if (result == null)
+				{
+					continue;
+				}
+				detectedResults.Add(result);
+				foreach (FileOrganizationBundleItem item in result.BundleItems)
+				{
+					bundledFiles.Add(item.SourcePath);
+				}
+				AddPluginLogLine($"{mediaType} season detected: {group.Key} -> {result.TargetPath ?? "(not resolved)"} {result.StatusMessage}");
+			}
+			foreach (FileOrganizationResult result in MergeSeasonBundles(detectedResults))
+			{
+				_organizationService.SaveResult(result, cancellationToken);
+				await DeleteBundledFileResults(result, detectedResults, cancellationToken).ConfigureAwait(false);
+				detected++;
+				AddPluginLogLine($"{mediaType} bundle saved: {result.OriginalPath} -> {result.TargetPath ?? "(not resolved)"} {result.StatusMessage}");
+			}
+			eligibleFiles = eligibleFiles.Where(file => !bundledFiles.Contains(file.FullName)).ToList();
+		}
 		progress.Report(10);
 		for (int index = 0; index < eligibleFiles.Count; index++)
 		{
@@ -182,12 +290,7 @@ public sealed class FolderOrganizer
 		}
 		cancellationToken.ThrowIfCancellationRequested();
 		progress.Report(99);
-		List<string> deleteExtensions = (configuredDeleteExtensions ?? Array.Empty<string>())
-			.Where(extension => extension != null)
-			.Select(extension => extension.Trim().TrimStart('.'))
-			.Where(extension => extension.Length > 0)
-			.Select(extension => "." + extension)
-			.ToList();
+		List<string> deleteExtensions = GetDeleteExtensions(configuredDeleteExtensions);
 		Clean(processedFolders, watchLocations, deleteEmptyFolders, deleteExtensions, mediaType, cancellationToken);
 		if (extendedClean)
 		{
@@ -195,6 +298,16 @@ public sealed class FolderOrganizer
 		}
 		SaveScanLog(scanLog, mediaType, configuredLocations.Count, watchLocations.Count, skippedLocations, foundFiles.Count, eligibleFiles.Count, succeeded, detected, skipped, failed, minFileSizeMb, cancellationToken);
 		progress.Report(100);
+	}
+
+	private static List<string> GetDeleteExtensions(IEnumerable<string>? configuredDeleteExtensions)
+	{
+		return (configuredDeleteExtensions ?? Array.Empty<string>())
+			.Where(extension => extension != null)
+			.Select(extension => extension.Trim().TrimStart('.'))
+			.Where(extension => extension.Length > 0)
+			.Select(extension => "." + extension)
+			.ToList();
 	}
 
 	private bool CanOrganize(FileSystemMetadata file, long minimumFileSize, HashSet<string> videoBaseNames)
@@ -215,6 +328,10 @@ public sealed class FolderOrganizer
 	{
 		try
 		{
+			if (!SafeFileTransfer.IsLikelyVideoFile(file.FullName, _namingOptions))
+			{
+				return false;
+			}
 			return VideoResolver.IsVideoFile(file.FullName, _namingOptions);
 		}
 		catch (Exception exception)
@@ -263,11 +380,10 @@ public sealed class FolderOrganizer
 
 	private FileOrganizationResult CreateScanLog(string mediaType, string message, FileSortingStatus status)
 	{
-		string root = string.IsNullOrWhiteSpace(_logDirectoryPath) ? Path.GetTempPath() : _logDirectoryPath;
 		return new FileOrganizationResult
 		{
 			Date = DateTime.UtcNow,
-			OriginalPath = Path.Combine(root, "AutoOrganize", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff") + "-" + mediaType + ".log"),
+			OriginalPath = "Jellyfin logs: AutoOrganize",
 			OriginalFileName = mediaType + " scan",
 			ExtractedName = mediaType + " scan",
 			Status = status,
@@ -291,38 +407,306 @@ public sealed class FolderOrganizer
 
 	private void AddPluginLogLine(string message)
 	{
-		string line = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz") + " " + message;
-		AppendPluginLogLines(new[] { line });
-	}
-
-	private void AppendPluginLogLines(IReadOnlyList<string> lines)
-	{
-		if (string.IsNullOrWhiteSpace(_logDirectoryPath) || lines.Count == 0)
-		{
-			return;
-		}
-		try
-		{
-			string directory = Path.Combine(_logDirectoryPath, "AutoOrganize");
-			Directory.CreateDirectory(directory);
-			string path = Path.Combine(directory, DateTimeOffset.Now.ToString("yyyy-MM-dd") + ".log");
-			string text = string.Join(Environment.NewLine, lines) + Environment.NewLine;
-			lock (PluginLogLock)
-			{
-				File.AppendAllText(path, text);
-			}
-		}
-		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-		{
-			_logger.LogWarning(exception, "Unable to write Auto Organize plugin log");
-		}
+		_logger.LogInformation("AutoOrganize: {Message}", message);
 	}
 
 	private List<FileSystemMetadata> GetFilesToOrganize(string path)
 	{
+		return GetFilesToOrganize(path, recursive: true);
+	}
+
+	public async Task<FileOrganizationResult> RefreshTvSeasonBundleMetadata(FileOrganizationResult current, TvFileOrganizationOptions options, CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(current);
+		ArgumentNullException.ThrowIfNull(options);
+		var organizer = new EpisodeFileOrganizer(_organizationService, _fileSystem, _loggerFactory.CreateLogger<EpisodeFileOrganizer>(), _libraryManager, _libraryMonitor, _providerManager, _namingOptions);
+		string[] directories = current.BundleItems
+			.Select(item => Path.GetDirectoryName(item.SourcePath))
+			.Where(path => !string.IsNullOrWhiteSpace(path))
+			.Cast<string>()
+			.Distinct(PathSafety.PathComparer)
+			.ToArray();
+		if (directories.Length == 0 && _fileSystem.DirectoryExists(current.OriginalPath))
+		{
+			directories = new[] { current.OriginalPath };
+		}
+
+		var detectedResults = new List<FileOrganizationResult>();
+		foreach (string directory in directories)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			FileOrganizationResult? detected = await organizer
+				.DetectSeasonDirectory(directory, GetFilesToOrganize(directory, recursive: false), options, cancellationToken)
+				.ConfigureAwait(false);
+			if (detected != null)
+			{
+				detectedResults.Add(detected);
+			}
+		}
+
+		FileOrganizationResult refreshed = MergeSeasonBundles(detectedResults).FirstOrDefault()
+			?? throw new OrganizationException("No matching TV season metadata was found.");
+		refreshed.OriginalPath = current.OriginalPath;
+		refreshed.OriginalFileName = current.OriginalFileName;
+		_organizationService.SaveResult(refreshed, cancellationToken);
+		return refreshed;
+	}
+
+	private async Task<FileOrganizationResult> OrganizeApprovedBundle(string rootPath, IReadOnlyList<FileOrganizationBundleItem> bundleItems, TvFileOrganizationOptions options, CancellationToken cancellationToken)
+	{
+		var result = new FileOrganizationResult
+		{
+			Date = DateTime.UtcNow,
+			OriginalPath = rootPath,
+			OriginalFileName = Path.GetFileName(Path.TrimEndingDirectorySeparator(rootPath)),
+			Type = FileOrganizerType.Episode,
+			BundleItems = bundleItems
+		};
+		List<FileOrganizationBundleItem> items = bundleItems
+			.Where(item => !string.IsNullOrWhiteSpace(item.SourcePath) && !string.IsNullOrWhiteSpace(item.TargetPath))
+			.DistinctBy(item => item.SourcePath, PathSafety.PathComparer)
+			.ToList();
+		if (items.Count == 0)
+		{
+			result.Status = FileSortingStatus.Failure;
+			result.StatusMessage = "Approved bundle no longer contains any approved files.";
+			_organizationService.SaveResult(result, cancellationToken);
+			return result;
+		}
+		int succeeded = 0;
+		int skipped = 0;
+		int failed = 0;
+		var movedSourcePaths = new List<string>();
+		List<string> watchLocations = options.WatchLocations
+			.Select(location => PathSafety.TryNormalize(location, out string root) ? root : null)
+			.Where(root => root != null)
+			.Cast<string>()
+			.Distinct(PathSafety.PathComparer)
+			.ToList();
+		foreach (FileOrganizationBundleItem item in items)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			string? sourceRoot = watchLocations.FirstOrDefault(root => PathSafety.IsSameOrSubPath(root, item.SourcePath));
+			if (sourceRoot == null || PathSafety.TraversesSymbolicLink(sourceRoot, item.SourcePath))
+			{
+				failed++;
+				AddPluginLogLine($"TV bundle rejected unsafe source: {item.SourcePath}");
+				continue;
+			}
+			try
+			{
+				PathSafety.EnsureWithinLibraryRoots(item.TargetPath, GetLibraryRoots());
+				result.FileSize += _fileSystem.FileExists(item.SourcePath) ? _fileSystem.GetFileInfo(item.SourcePath).Length : 0;
+				if (PathSafety.AreSame(item.SourcePath, item.TargetPath))
+				{
+					succeeded++;
+					continue;
+				}
+				if (!options.OverwriteExistingEpisodes && _fileSystem.FileExists(item.TargetPath))
+				{
+					skipped++;
+					continue;
+				}
+				_libraryMonitor.ReportFileSystemChangeBeginning(item.TargetPath);
+				try
+				{
+					await SafeFileTransfer.TransferSingleAsync(item.SourcePath, item.TargetPath, options.CopyOriginalFile, options.OverwriteExistingEpisodes, cancellationToken).ConfigureAwait(false);
+				}
+				finally
+				{
+					_libraryMonitor.ReportFileSystemChangeComplete(item.TargetPath, refreshPath: true);
+				}
+				succeeded++;
+				if (!options.CopyOriginalFile)
+				{
+					movedSourcePaths.Add(item.SourcePath);
+				}
+			}
+			catch (OperationCanceledException)
+			{
+				throw;
+			}
+			catch (Exception exception)
+			{
+				failed++;
+				AddPluginLogLine($"TV bundle item failed: {item.SourcePath} -> {item.TargetPath} {exception.Message}");
+				_logger.LogError(exception, "Error organizing approved bundle item {SourcePath} to {TargetPath}", item.SourcePath, item.TargetPath);
+			}
+		}
+		CleanApprovedSources(movedSourcePaths, options.WatchLocations, options.DeleteEmptyFolders, options.LeftOverFileExtensionsToDelete, "TV", cancellationToken);
+		result.TargetPath = GetMergedBundleItemTargetPath(items);
+		result.Status = failed == 0 ? FileSortingStatus.Success : FileSortingStatus.Failure;
+		result.StatusMessage = failed == 0
+			? $"Approved bundle. Organized {succeeded}, skipped {skipped}."
+			: $"Approved bundle with {failed} failure(s). Organized {succeeded}, skipped {skipped}.";
+		_organizationService.SaveResult(result, cancellationToken);
+		return result;
+	}
+
+	public void CleanApprovedSources(IEnumerable<string> sourcePaths, IEnumerable<string>? configuredWatchLocations, bool deleteEmptyFolders, IEnumerable<string>? configuredDeleteExtensions, string mediaType, CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(sourcePaths);
+		List<string> deleteExtensions = GetDeleteExtensions(configuredDeleteExtensions);
+		if (!deleteEmptyFolders && deleteExtensions.Count == 0)
+		{
+			return;
+		}
+		List<string> watchLocations = (configuredWatchLocations ?? Array.Empty<string>())
+			.Select(location => PathSafety.TryNormalize(location, out string root) ? root : null)
+			.Where(root => root != null)
+			.Cast<string>()
+			.Distinct(PathSafety.PathComparer)
+			.ToList();
+		List<string> sourceFolders = sourcePaths
+			.Select(Path.GetDirectoryName)
+			.Where(path => !string.IsNullOrWhiteSpace(path))
+			.Cast<string>()
+			.Distinct(PathSafety.PathComparer)
+			.ToList();
+		Clean(sourceFolders, watchLocations, deleteEmptyFolders, deleteExtensions, mediaType, cancellationToken);
+	}
+
+	private static IReadOnlyList<FileOrganizationResult> MergeSeasonBundles(IReadOnlyList<FileOrganizationResult> results)
+	{
+		var mergedIds = new HashSet<string>(PathSafety.PathComparer);
+		var mergedResults = new List<FileOrganizationResult>();
+		foreach (var group in results.GroupBy(GetShowBundleKey, StringComparer.OrdinalIgnoreCase).Where(group => group.Key != null))
+		{
+			List<FileOrganizationResult> seasons = group.OrderBy(result => result.ExtractedSeasonNumber).ToList();
+			if (seasons.Select(result => result.ExtractedSeasonNumber).Where(season => season.HasValue).Distinct().Count() <= 1)
+			{
+				continue;
+			}
+			FileOrganizationResult first = seasons[0];
+			string sourceRoot = Path.GetDirectoryName(first.OriginalPath) ?? first.OriginalPath;
+			string? targetRoot = GetMergedTargetPath(seasons);
+			var sourcePaths = new HashSet<string>(PathSafety.PathComparer);
+			List<FileOrganizationBundleItem> items = seasons
+				.SelectMany(result => result.BundleItems)
+				.Where(item => !string.IsNullOrWhiteSpace(item.SourcePath) && sourcePaths.Add(item.SourcePath))
+				.OrderBy(item => item.SeasonNumber)
+				.ThenBy(item => item.SourcePath, PathSafety.PathComparer)
+				.ToList();
+			mergedResults.Add(new FileOrganizationResult
+			{
+				Date = DateTime.UtcNow,
+				OriginalPath = sourceRoot,
+				OriginalFileName = Path.GetFileName(Path.TrimEndingDirectorySeparator(sourceRoot)),
+				ExtractedName = first.ExtractedName,
+				ExtractedYear = first.ExtractedYear,
+				TargetPath = targetRoot,
+				Type = first.Type,
+				FileSize = seasons.Sum(result => result.FileSize),
+				BundleItems = items,
+				Status = FileSortingStatus.Detected,
+				StatusMessage = $"Detected {seasons.Count} season(s), {items.Count} bundled file(s) as {first.ExtractedName}. Waiting for approval."
+			});
+			foreach (FileOrganizationResult season in seasons)
+			{
+				mergedIds.Add(season.OriginalPath);
+			}
+		}
+		mergedResults.AddRange(results.Where(result => !mergedIds.Contains(result.OriginalPath)));
+		return mergedResults;
+	}
+
+	private static string? GetShowBundleKey(FileOrganizationResult result)
+	{
+		string? root = GetBundleTargetRoot(result) ?? Path.GetDirectoryName(result.OriginalPath);
+		return string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(result.ExtractedName)
+			? null
+			: root + "\0" + result.ExtractedName + "\0" + result.ExtractedYear?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+	}
+
+	private static string? GetBundleTargetRoot(FileOrganizationResult result)
+	{
+		if (string.IsNullOrWhiteSpace(result.TargetPath))
+		{
+			return null;
+		}
+		return result.ExtractedSeasonNumber.HasValue
+			? Path.GetDirectoryName(result.TargetPath)
+			: result.TargetPath;
+	}
+
+	private static string? GetMergedTargetPath(IReadOnlyList<FileOrganizationResult> seasons)
+	{
+		string[] targets = seasons
+			.Select(result => result.TargetPath)
+			.Where(path => !string.IsNullOrWhiteSpace(path))
+			.Cast<string>()
+			.Distinct(PathSafety.PathComparer)
+			.ToArray();
+		if (targets.Length == 1)
+		{
+			return targets[0];
+		}
+		string[] parents = targets
+			.Select(path => Path.GetDirectoryName(path))
+			.Where(path => !string.IsNullOrWhiteSpace(path))
+			.Cast<string>()
+			.Distinct(PathSafety.PathComparer)
+			.ToArray();
+		return parents.Length == 1 ? parents[0] : null;
+	}
+
+	private static string? GetMergedBundleItemTargetPath(IReadOnlyList<FileOrganizationBundleItem> items)
+	{
+		string[] parentFolders = items
+			.Select(item => Path.GetDirectoryName(item.TargetPath))
+			.Where(path => !string.IsNullOrWhiteSpace(path))
+			.Cast<string>()
+			.Distinct(PathSafety.PathComparer)
+			.ToArray();
+		if (parentFolders.Length == 1)
+		{
+			return parentFolders[0];
+		}
+		string[] seriesFolders = parentFolders
+			.Select(Path.GetDirectoryName)
+			.Where(path => !string.IsNullOrWhiteSpace(path))
+			.Cast<string>()
+			.Distinct(PathSafety.PathComparer)
+			.ToArray();
+		return seriesFolders.Length == 1 ? seriesFolders[0] : null;
+	}
+
+	private List<string> GetLibraryRoots()
+	{
+		return (from path in _libraryManager.GetVirtualFolders().SelectMany(folder => folder.Locations ?? Array.Empty<string>())
+			where !string.IsNullOrWhiteSpace(path)
+			select path).ToList();
+	}
+
+	private async Task DeleteBundledFileResults(FileOrganizationResult result, IReadOnlyList<FileOrganizationResult> detectedResults, CancellationToken cancellationToken)
+	{
+		foreach (string sourcePath in result.BundleItems.Select(item => item.SourcePath).Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(PathSafety.PathComparer))
+		{
+			FileOrganizationResult? existing = _organizationService.GetResultBySourcePath(sourcePath);
+			if (existing != null && !existing.IsInProgress)
+			{
+				await _organizationService.DeleteResult(existing.Id, cancellationToken).ConfigureAwait(false);
+			}
+		}
+		var resultSources = new HashSet<string>(result.BundleItems.Select(item => item.SourcePath), PathSafety.PathComparer);
+		foreach (string sourcePath in detectedResults
+			.Where(item => !PathSafety.PathComparer.Equals(item.OriginalPath, result.OriginalPath) && item.BundleItems.Any(bundleItem => resultSources.Contains(bundleItem.SourcePath)))
+			.Select(item => item.OriginalPath)
+			.Distinct(PathSafety.PathComparer))
+		{
+			FileOrganizationResult? existing = _organizationService.GetResultBySourcePath(sourcePath);
+			if (existing != null && !existing.IsInProgress)
+			{
+				await _organizationService.DeleteResult(existing.Id, cancellationToken).ConfigureAwait(false);
+			}
+		}
+	}
+
+	private List<FileSystemMetadata> GetFilesToOrganize(string path, bool recursive)
+	{
 		try
 		{
-			return _fileSystem.GetFiles(path, recursive: true)
+			return _fileSystem.GetFiles(path, recursive)
 				.Where(file => !PathSafety.TraversesSymbolicLink(path, file.FullName))
 				.ToList();
 		}

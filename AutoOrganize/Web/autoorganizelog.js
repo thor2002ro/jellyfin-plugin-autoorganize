@@ -44,6 +44,15 @@ ApiClient.performOrganization = function (id) {
     });
 };
 
+ApiClient.refreshOrganizationMetadata = function (id) {
+    const url = this.getUrl('Library/FileOrganizations/' + encodeURIComponent(id) + '/Metadata/Refresh');
+
+    return this.ajax({
+        type: 'POST',
+        url: url
+    });
+};
+
 const query = {
     StartIndex: 0,
     Limit: 50
@@ -52,6 +61,10 @@ const query = {
 let currentResult = { Items: [], TotalRecordCount: 0 };
 let pageGlobal;
 let reloadGeneration = 0;
+let organizeTaskRunning = false;
+let organizeTaskId = null;
+let organizeTaskRefreshTimer = null;
+let organizeTaskRefreshRetries = 0;
 
 function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, function (character) {
@@ -79,8 +92,105 @@ function findItem(id) {
     }) || null;
 }
 
+async function getAutoOrganizeTask() {
+    const tasks = await ApiClient.getJSON(ApiClient.getUrl('ScheduledTasks'));
+    return (tasks || []).find(function (task) {
+        return task.Key === 'AutoOrganize';
+    }) || null;
+}
+
+async function refreshOrganizeTaskState(page) {
+    if (!page) {
+        return false;
+    }
+
+    try {
+        const task = await getAutoOrganizeTask();
+        organizeTaskId = task?.Id || null;
+        const running = isTaskRunning(task);
+        setOrganizeTaskRunning(page, running);
+        return running;
+    } catch {
+        setOrganizeTaskRunning(page, false);
+        return false;
+    }
+}
+
+function getScheduledTaskKey(data) {
+    return data?.Key || data?.Task?.Key || data?.task?.Key || data?.Item?.Key || data?.item?.Key || '';
+}
+
+function isTaskRunning(task) {
+    return String(task?.State || '').toLowerCase() === 'running';
+}
+
+function scheduleOrganizeTaskRefresh(page, delayMs = 1000, retries = 0) {
+    clearTimeout(organizeTaskRefreshTimer);
+    organizeTaskRefreshRetries = Math.max(0, retries);
+    organizeTaskRefreshTimer = setTimeout(async function () {
+        const running = await refreshOrganizeTaskState(page);
+        if (running || organizeTaskRefreshRetries > 0) {
+            scheduleOrganizeTaskRefresh(page, running ? 1500 : 1000, running ? 20 : organizeTaskRefreshRetries - 1);
+        }
+    }, delayMs);
+}
+
+function setOrganizeTaskRunning(page, running) {
+    organizeTaskRunning = Boolean(running);
+    if (!organizeTaskRunning) {
+        organizeTaskId = null;
+    }
+
+    const button = page?.querySelector('.btnOrganize');
+    if (!button) {
+        return;
+    }
+
+    button.classList.toggle('button-submit', !organizeTaskRunning);
+    button.classList.toggle('button-cancel', organizeTaskRunning);
+    button.classList.toggle('aoCancelTask', organizeTaskRunning);
+    if (organizeTaskRunning) {
+        button.disabled = false;
+    }
+    button.setAttribute('aria-label', organizeTaskRunning ? 'Cancel' : 'Organize now');
+    const icon = button.querySelector('.material-icons');
+    if (icon) {
+        icon.classList.toggle('play_arrow', !organizeTaskRunning);
+        icon.classList.toggle('cancel', organizeTaskRunning);
+    }
+    const label = button.querySelector('.aoOrganizeLabel');
+    if (label) {
+        label.textContent = organizeTaskRunning ? 'Cancel' : 'Organize now';
+    }
+}
+
+async function cancelAutoOrganizeTask(page) {
+    Loading.show();
+    clearTimeout(organizeTaskRefreshTimer);
+
+    try {
+        const taskId = organizeTaskId || (await getAutoOrganizeTask())?.Id;
+        if (!taskId) {
+            setOrganizeTaskRunning(page, false);
+            return;
+        }
+
+        await ApiClient.ajax({
+            type: 'DELETE',
+            url: ApiClient.getUrl('ScheduledTasks/Running/' + encodeURIComponent(taskId))
+        });
+        setOrganizeTaskRunning(page, false);
+    } catch (error) {
+        await refreshOrganizeTaskState(page);
+        Dashboard.processErrorResponse(error);
+    } finally {
+        scheduleOrganizeTaskRefresh(page, 1000, 2);
+        Loading.hide();
+    }
+}
+
 function isApprovable(item) {
-    return item?.Status === 'Detected' && item.TargetPath && item.Type !== 'Log' && !item.IsInProgress;
+    return item?.Status === 'Detected' && (item.TargetPath || isBundle(item)) && item.Type !== 'Log' && !item.IsInProgress;
 }
 
 function isRejectable(item) {
@@ -91,8 +201,16 @@ function isSubtitleFile(item) {
     return /\.(srt|ass|ssa|sub|idx|vtt|smi|sami|sup)$/i.test(item?.OriginalPath || item?.OriginalFileName || '');
 }
 
+function isBundle(item) {
+    return Array.isArray(item?.BundleItems) && item.BundleItems.length > 0;
+}
+
 function isEditable(item) {
-    return item?.Type !== 'Log' && !item?.IsInProgress && item?.Status !== 'Success' && !isSubtitleFile(item);
+    return item?.Type !== 'Log' && !item?.IsInProgress && item?.Status !== 'Success' && !isSubtitleFile(item) && !isBundle(item);
+}
+
+function isMetadataRefreshable(item) {
+    return item?.Type !== 'Log' && !item?.IsInProgress && item?.Status === 'Detected' && !isSubtitleFile(item);
 }
 
 function isDeletable(item) {
@@ -251,21 +369,36 @@ async function approveFile(page, id) {
     }
 }
 
+async function refreshMetadata(page, id) {
+    Loading.show();
+
+    try {
+        await ApiClient.refreshOrganizationMetadata(id);
+        await reloadItems(page);
+    } catch (error) {
+        Dashboard.processErrorResponse(error);
+    } finally {
+        Loading.hide();
+    }
+}
+
 function organizeFile(page, id) {
     const item = findItem(id);
     if (!item) {
         return;
     }
 
-    if (!item.TargetPath) {
+    if (!item.TargetPath && !isBundle(item)) {
         showCorrectionPopup(page, item);
         return;
     }
 
-    let message = 'The following file will be moved from:<br/><br/>' +
-        escapeHtml(item.OriginalPath) +
-        '<br/><br/>To:<br/><br/>' +
-        escapeHtml(item.TargetPath);
+    let message = isBundle(item)
+        ? 'The following season bundle will be organized:<br/><br/>' + renderBundleConfirmList(item)
+        : 'The following file will be moved from:<br/><br/>' +
+            escapeHtml(item.OriginalPath) +
+            '<br/><br/>To:<br/><br/>' +
+            escapeHtml(item.TargetPath);
     const duplicatePaths = Array.isArray(item.DuplicatePaths) ? item.DuplicatePaths : [];
 
     if (duplicatePaths.length > 0) {
@@ -377,12 +510,12 @@ function getQueryPagingHtml(options) {
         html += '<span class="listPagingText">' +
             startAtDisplay + '-' + recordsEnd + ' of ' + totalRecordCount +
             '</span><div class="listPagingButtons">';
-        html += '<button type="button" is="paper-icon-button-light" class="btnPreviousPage autoSize" ' +
-            (startIndex ? '' : 'disabled') +
-            ' title="Previous page"><span class="material-icons arrow_back">arrow_back</span></button>';
-        html += '<button type="button" is="paper-icon-button-light" class="btnNextPage autoSize" ' +
-            (startIndex + limit >= totalRecordCount ? 'disabled' : '') +
-            ' title="Next page"><span class="material-icons arrow_forward">arrow_forward</span></button>';
+		html += '<button type="button" is="paper-icon-button-light" class="btnPreviousPage autoSize" ' +
+			(startIndex ? '' : 'disabled') +
+			' title="Previous page"><span class="material-icons arrow_back" aria-hidden="true"></span></button>';
+		html += '<button type="button" is="paper-icon-button-light" class="btnNextPage autoSize" ' +
+			(startIndex + limit >= totalRecordCount ? 'disabled' : '') +
+			' title="Next page"><span class="material-icons arrow_forward" aria-hidden="true"></span></button>';
         html += '</div>';
     }
 
@@ -478,6 +611,50 @@ function getMatchedMetadataText(item) {
     return text;
 }
 
+function getFileName(path) {
+    return String(path || '').split(/[\\/]/).pop() || path || '';
+}
+
+function renderBundleList(items, key) {
+    if (!Array.isArray(items) || items.length === 0) {
+        return '';
+    }
+
+    if (!items.some(function (item) { return item?.SeasonNumber != null; })) {
+        return renderBundleItems(items, key);
+    }
+
+    const groups = new Map();
+    for (const item of items) {
+        const season = item?.SeasonNumber ?? '';
+        if (!groups.has(season)) {
+            groups.set(season, []);
+        }
+        groups.get(season).push(item);
+    }
+
+    return Array.from(groups.keys()).sort(function (left, right) {
+        return Number(left) - Number(right);
+    }).map(function (season) {
+        const label = season === '' ? 'Season unknown' : 'Season ' + String(season).padStart(2, '0');
+        return '<div class="aoBundleSeason">' + escapeHtml(label) + '</div>' + renderBundleItems(groups.get(season), key);
+    }).join('');
+}
+
+function renderBundleItems(items, key) {
+    return '<ol class="aoBundleList">' + items.map(function (item) {
+        const path = item?.[key] || '';
+        return '<li title="' + escapeHtml(path) + '">' + escapeHtml(getFileName(path)) + '</li>';
+    }).join('') + '</ol>';
+}
+
+function renderBundleConfirmList(item) {
+    const items = Array.isArray(item.BundleItems) ? item.BundleItems : [];
+    return items.map(function (bundleItem) {
+        return escapeHtml(bundleItem.SourcePath || '') + '<br/>&rarr; ' + escapeHtml(bundleItem.TargetPath || '');
+    }).join('<br/><br/>');
+}
+
 function renderItemRow(item) {
     const id = escapeHtml(item.Id);
     const fileName = escapeHtml(item.Type === 'Log' ? (item.ExtractedName || item.OriginalFileName) : item.OriginalFileName);
@@ -517,6 +694,11 @@ function renderItemRow(item) {
                 '" class="btnProcessResult organizerButton autoSize" title="Edit match" aria-label="Edit match for ' +
                 fileName + '"><span class="material-icons edit" aria-hidden="true"></span></button>';
         }
+        if (isMetadataRefreshable(item)) {
+            buttons += '<button type="button" is="paper-icon-button-light" data-resultid="' + id +
+                '" class="btnRefreshMetadata organizerButton autoSize" title="Refresh metadata" aria-label="Refresh metadata for ' +
+                fileName + '"><span class="material-icons manage_search" aria-hidden="true"></span></button>';
+        }
         buttons += '<button type="button" is="paper-icon-button-light" data-resultid="' + id +
             '" class="btnRejectResult organizerButton autoSize" title="Reject" aria-label="Reject ' +
             fileName + '"><span class="material-icons close" aria-hidden="true"></span></button>';
@@ -539,9 +721,11 @@ function renderItemRow(item) {
             '<div class="aoFileMeta">' + escapeHtml(formatOrganizerType(item.Type)) + ' · ' +
                 escapeHtml(formatFileSize(item.FileSize)) + '</div>' +
             matchedMetadataHtml +
-            '<div class="aoFilePath" title="' + originalPath + '">' + originalPath + '</div></td>' +
+            '<div class="aoFilePath" title="' + originalPath + '">' + originalPath + '</div>' +
+            renderBundleList(item.BundleItems, 'SourcePath') + '</td>' +
         '<td data-title="Destination" class="detailTableBodyCell fileCell">' +
-            (item.Type === 'Log' ? '<span class="aoDestinationEmpty">Scan summary</span>' : (targetPath || '<span class="aoDestinationEmpty">Not resolved</span>')) + '</td>' +
+            (item.Type === 'Log' ? '<span class="aoDestinationEmpty">Scan summary</span>' : (targetPath || '<span class="aoDestinationEmpty">Not resolved</span>')) +
+            renderBundleList(item.BundleItems, 'TargetPath') + '</td>' +
         '<td class="detailTableBodyCell organizerButtonCell" style="white-space:nowrap;">' + buttons + '</td>';
 }
 
@@ -567,6 +751,13 @@ function handleItemClick(event) {
         return;
     }
 
+    const refreshMetadataButton = parentWithClass(event.target, 'btnRefreshMetadata');
+    if (refreshMetadataButton) {
+        event.preventDefault();
+        refreshMetadata(pageGlobal, refreshMetadataButton.dataset.resultid);
+        return;
+    }
+
     const rejectButton = parentWithClass(event.target, 'btnRejectResult');
     if (rejectButton) {
         event.preventDefault();
@@ -583,9 +774,13 @@ function handleItemClick(event) {
 
 function onServerEvent(event, apiClient, data) {
     if (event.type === 'ScheduledTaskEnded') {
-        if (data?.Key === 'AutoOrganize') {
+        if (getScheduledTaskKey(data) === 'AutoOrganize') {
+            setOrganizeTaskRunning(pageGlobal, false);
             reloadItems(pageGlobal);
         }
+    } else if (event.type === 'ScheduledTaskStarted' && getScheduledTaskKey(data) === 'AutoOrganize') {
+        setOrganizeTaskRunning(pageGlobal, true);
+        scheduleOrganizeTaskRefresh(pageGlobal);
     } else if (event.type === 'AutoOrganize_ItemUpdated' && data) {
         updateItemStatus(pageGlobal, data);
     } else {
@@ -677,6 +872,19 @@ export default function (view) {
     view.querySelector('.btnRefreshLog').addEventListener('click', function () {
         reloadItems(view);
     });
+    view.querySelector('.btnOrganize').addEventListener('click', function (event) {
+        if (!organizeTaskRunning) {
+            setTimeout(function () {
+                setOrganizeTaskRunning(view, true);
+            }, 0);
+            scheduleOrganizeTaskRefresh(view, 1000, 3);
+            return;
+        }
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        cancelAutoOrganizeTask(view);
+    }, true);
 
     view.addEventListener('viewshow', function () {
         pageGlobal = view;
@@ -687,6 +895,7 @@ export default function (view) {
         Events.on(ServerNotifications, 'AutoOrganize_ItemUpdated', onServerEvent);
         Events.on(ServerNotifications, 'AutoOrganize_ItemRemoved', onServerEvent);
         Events.on(ServerNotifications, 'AutoOrganize_ItemAdded', onServerEvent);
+        Events.on(ServerNotifications, 'ScheduledTaskStarted', onServerEvent);
         Events.on(ServerNotifications, 'ScheduledTaskEnded', onServerEvent);
 
         TaskButton({
@@ -696,16 +905,23 @@ export default function (view) {
             taskKey: 'AutoOrganize',
             button: view.querySelector('.btnOrganize')
         });
+        refreshOrganizeTaskState(view);
+        scheduleOrganizeTaskRefresh(view, 1000, 2);
+        setTimeout(function () {
+            refreshOrganizeTaskState(view);
+        }, 3000);
     });
 
     view.addEventListener('viewhide', function () {
         reloadGeneration++;
         currentResult = { Items: [], TotalRecordCount: 0 };
+        clearTimeout(organizeTaskRefreshTimer);
 
         Events.off(ServerNotifications, 'AutoOrganize_LogReset', onServerEvent);
         Events.off(ServerNotifications, 'AutoOrganize_ItemUpdated', onServerEvent);
         Events.off(ServerNotifications, 'AutoOrganize_ItemRemoved', onServerEvent);
         Events.off(ServerNotifications, 'AutoOrganize_ItemAdded', onServerEvent);
+        Events.off(ServerNotifications, 'ScheduledTaskStarted', onServerEvent);
         Events.off(ServerNotifications, 'ScheduledTaskEnded', onServerEvent);
 
         TaskButton({

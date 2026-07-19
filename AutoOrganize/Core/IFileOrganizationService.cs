@@ -25,6 +25,8 @@ public interface IFileOrganizationService
 
 	Task PerformOrganization(MovieFileOrganizationRequest request, CancellationToken cancellationToken);
 
+	Task RefreshMetadata(string resultId, CancellationToken cancellationToken);
+
 	QueryResult<FileOrganizationResult> GetResults(FileOrganizationResultQuery query);
 
 	FileOrganizationResult? GetResult(string id);
