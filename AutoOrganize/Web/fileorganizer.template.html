@@ -1,4 +1,4 @@
-﻿<div class="formDialogHeader">
+<div class="formDialogHeader">
     <button is="paper-icon-button-light" class="btnCancel autoSize" tabindex="-1">
         <span class="material-icons arrow_back"></span>
     </button>
@@ -44,10 +44,10 @@
                         <input is="emby-input" id="txtSeason" type="number" pattern="[0-9]*" required min="0" label="Season number:" />
                     </div>
                     <div class="fldTxtEpisode inputContainer">
-                        <input is="emby-input" id="txtEpisode" type="number" pattern="[0-9]*" required min="0" label="Episode number:" />
+                        <input is="emby-input" id="txtEpisode" type="number" pattern="[0-9]*" required min="1" label="Episode number:" />
                     </div>
                     <div class="fldTxtEndingEpisode inputContainer">
-                        <input is="emby-input" id="txtEndingEpisode" type="number" pattern="[0-9]*" min="0" label="Ending episode number:" />
+                        <input is="emby-input" id="txtEndingEpisode" type="number" pattern="[0-9]*" min="1" label="Ending episode number:" />
                         <div class="fieldDescription">Only required for multi-episode files.</div>
                     </div>
                     <div class="fldRemember hide checkboxContainer checkboxContainer-withDescription">

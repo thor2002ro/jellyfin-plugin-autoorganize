@@ -1,7 +1,5 @@
-﻿ApiClient.getSmartMatchInfos = function (options) {
-    options = options || {};
-
-    const url = this.getUrl('Library/FileOrganizations/SmartMatches', options);
+ApiClient.getSmartMatchInfos = function (options) {
+    const url = this.getUrl('Library/FileOrganizations/SmartMatches', options || {});
 
     return this.ajax({
         type: 'GET',
@@ -13,126 +11,151 @@
 ApiClient.deleteSmartMatchEntries = function (entries) {
     const url = this.getUrl('Library/FileOrganizations/SmartMatches/Delete');
 
-    const postData = {
-        Entries: entries
-    };
-
     return this.ajax({
-
         type: 'POST',
         url: url,
-        data: JSON.stringify(postData),
+        data: JSON.stringify({ Entries: entries }),
         contentType: 'application/json'
     });
 };
 
-const query = {
-
-    StartIndex: 0,
-    Limit: 100000
-};
-
+const pageSize = 1000;
 let currentResult;
 
-function parentWithClass(elem, className) {
-    while (!elem.classList || !elem.classList.contains(className)) {
-        elem = elem.parentNode;
-
-        if (!elem) {
-            return null;
-        }
+function parentWithClass(element, className) {
+    while (element && (!element.classList || !element.classList.contains(className))) {
+        element = element.parentNode;
     }
 
-    return elem;
+    return element || null;
 }
 
-function reloadList(page) {
-    Loading.show();
+async function getAllSmartMatchInfos() {
+    const items = [];
+    let startIndex = 0;
+    let totalRecordCount = 0;
 
-    ApiClient.getSmartMatchInfos(query).then(function (infos) {
-        currentResult = infos;
+    while (true) {
+        const result = await ApiClient.getSmartMatchInfos({
+            StartIndex: startIndex,
+            Limit: pageSize
+        });
+        const pageItems = Array.isArray(result?.Items) ? result.Items : [];
 
-        populateList(page, infos);
+        items.push(...pageItems);
+        totalRecordCount = Number.isFinite(result?.TotalRecordCount)
+            ? result.TotalRecordCount
+            : items.length;
 
-        Loading.hide();
-    }, function () {
-        Loading.hide();
-    });
+        if (pageItems.length === 0 || items.length >= totalRecordCount || pageItems.length < pageSize) {
+            break;
+        }
+
+        startIndex += pageItems.length;
+    }
+
+    return {
+        Items: items,
+        TotalRecordCount: totalRecordCount
+    };
 }
 
-function getHtmlFromMatchStrings(info, i) {
-    let matchStringIndex = 0;
+function createMatchEntry(infoIndex, matchIndex, matchString) {
+    const entry = document.createElement('div');
+    entry.className = 'listItem';
 
-    return info.MatchStrings.map(function (m) {
-        let matchStringHtml = '';
+    const body = document.createElement('div');
+    body.className = 'listItemBody';
+    body.style.padding = '.1em 1em .4em 5.5em';
+    body.style.minHeight = '1.5em';
 
-        matchStringHtml += '<div class="listItem">';
+    const text = document.createElement('div');
+    text.className = 'listItemBodyText secondary';
+    text.textContent = matchString || '';
+    body.appendChild(text);
+    entry.appendChild(body);
 
-        matchStringHtml += '<div class="listItemBody" style="padding: .1em 1em .4em 5.5em; min-height: 1.5em;">';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.setAttribute('is', 'emby-button');
+    button.className = 'btnDeleteMatchEntry';
+    button.style.padding = '0';
+    button.dataset.index = String(infoIndex);
+    button.dataset.matchindex = String(matchIndex);
+    button.title = 'Delete';
 
-        matchStringHtml += "<div class='listItemBodyText secondary'>" + m + '</div>';
+    const icon = document.createElement('span');
+    icon.className = 'material-icons delete';
+    icon.textContent = 'delete';
+    button.appendChild(icon);
+    entry.appendChild(button);
 
-        matchStringHtml += '</div>';
-
-        matchStringHtml += '<button type="button" is="emby-button" class="btnDeleteMatchEntry" style="padding: 0;" data-index="' + i + '" data-matchindex="' + matchStringIndex + '" title="Delete"><span class="material-icons delete"></span></button>';
-
-        matchStringHtml += '</div>';
-        matchStringIndex++;
-
-        return matchStringHtml;
-    }).join('');
+    return entry;
 }
 
 function populateList(page, result) {
-    let infos = result.Items;
+    const infos = (Array.isArray(result?.Items) ? result.Items : []).sort(function (left, right) {
+        const leftName = left.OrganizerType + ' ' + (left.DisplayName || left.ItemName || '');
+        const rightName = right.OrganizerType + ' ' + (right.DisplayName || right.ItemName || '');
+        return leftName.localeCompare(rightName);
+    });
 
-    if (infos.length > 0) {
-        infos = infos.sort(function (a, b) {
-            a = a.OrganizerType + ' ' + (a.DisplayName || a.ItemName);
-            b = b.OrganizerType + ' ' + (b.DisplayName || b.ItemName);
+    currentResult = {
+        Items: infos,
+        TotalRecordCount: result?.TotalRecordCount ?? infos.length
+    };
 
-            if (a === b) {
-                return 0;
-            }
+    const container = page.querySelector('.divMatchInfos');
+    container.replaceChildren();
 
-            if (a < b) {
-                return -1;
-            }
+    if (infos.length === 0) {
+        return;
+    }
 
-            return 1;
+    const list = document.createElement('div');
+    list.className = 'paperList';
+
+    infos.forEach(function (info, infoIndex) {
+        const heading = document.createElement('div');
+        heading.className = 'listItem';
+
+        const iconContainer = document.createElement('div');
+        iconContainer.className = 'listItemIconContainer';
+        const icon = document.createElement('span');
+        icon.className = 'listItemIcon material-icons folder';
+        icon.textContent = 'folder';
+        iconContainer.appendChild(icon);
+        heading.appendChild(iconContainer);
+
+        const body = document.createElement('div');
+        body.className = 'listItemBody';
+        const title = document.createElement('h2');
+        title.className = 'listItemBodyText';
+        title.textContent = info.DisplayName || info.ItemName || '';
+        body.appendChild(title);
+        heading.appendChild(body);
+        list.appendChild(heading);
+
+        const matchStrings = Array.isArray(info.MatchStrings) ? info.MatchStrings : [];
+        matchStrings.forEach(function (matchString, matchIndex) {
+            list.appendChild(createMatchEntry(infoIndex, matchIndex, matchString));
         });
+    });
+
+    container.appendChild(list);
+}
+
+async function reloadList(page) {
+    Loading.show();
+
+    try {
+        const result = await getAllSmartMatchInfos();
+        populateList(page, result);
+    } catch (error) {
+        Dashboard.processErrorResponse(error);
+    } finally {
+        Loading.hide();
     }
-
-    let html = '';
-
-    if (infos.length) {
-        html += '<div class="paperList">';
-    }
-
-    for (let i = 0, length = infos.length; i < length; i++) {
-        const info = infos[i];
-
-        html += '<div class="listItem">';
-
-        html += '<div class="listItemIconContainer">';
-        html += '<span class="listItemIcon material-icons folder"></span>';
-        html += '</div>';
-
-        html += '<div class="listItemBody">';
-        html += "<h2 class='listItemBodyText'>" + (info.DisplayName || info.ItemName) + '</h2>';
-        html += '</div>';
-
-        html += '</div>';
-
-        html += getHtmlFromMatchStrings(info, i);
-    }
-
-    if (infos.length) {
-        html += '</div>';
-    }
-
-    const matchInfos = page.querySelector('.divMatchInfos');
-    matchInfos.innerHTML = html;
 }
 
 function getTabs() {
@@ -155,39 +178,43 @@ function getTabs() {
         }];
 }
 
-export default function (view, params) {
-    const self = this;
+export default function (view) {
+    view.querySelector('.divMatchInfos').addEventListener('click', function (event) {
+        const button = parentWithClass(event.target, 'btnDeleteMatchEntry');
 
-    const divInfos = view.querySelector('.divMatchInfos');
-
-    divInfos.addEventListener('click', function (e) {
-        const button = parentWithClass(e.target, 'btnDeleteMatchEntry');
-
-        if (button) {
-            const index = parseInt(button.getAttribute('data-index'));
-            const matchIndex = parseInt(button.getAttribute('data-matchindex'));
-
-            const info = currentResult.Items[index];
-            const entries = [
-                {
-                    Name: info.Id,
-                    Value: info.MatchStrings[matchIndex]
-                }];
-
-            ApiClient.deleteSmartMatchEntries(entries).then(function () {
-                reloadList(view);
-            }, Dashboard.processErrorResponse);
+        if (!button || !currentResult) {
+            return;
         }
+
+        const index = Number.parseInt(button.dataset.index, 10);
+        const matchIndex = Number.parseInt(button.dataset.matchindex, 10);
+        const info = currentResult.Items[index];
+        const matchString = info?.MatchStrings?.[matchIndex];
+
+        if (!info?.Id || !matchString) {
+            return;
+        }
+
+        Loading.show();
+        ApiClient.deleteSmartMatchEntries([
+            {
+                Name: info.Id,
+                Value: matchString
+            }
+        ]).then(function () {
+            return reloadList(view);
+        }, function (error) {
+            Loading.hide();
+            Dashboard.processErrorResponse(error);
+        });
     });
 
-    view.addEventListener('viewshow', function (e) {
+    view.addEventListener('viewshow', function () {
         LibraryMenu.setTabs('autoorganize', 3, getTabs);
-        Loading.show();
-
         reloadList(view);
     });
 
-    view.addEventListener('viewhide', function (e) {
+    view.addEventListener('viewhide', function () {
         currentResult = null;
     });
 }

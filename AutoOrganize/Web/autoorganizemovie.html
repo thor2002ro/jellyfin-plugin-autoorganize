@@ -1,4 +1,4 @@
-﻿<div id="libraryFileOrganizerPage" data-role="page" class="page type-interior pluginConfigurationPage withTabs" data-controller="__plugin/AutoOrganizeMovieJs">
+<div id="libraryFileOrganizerMoviePage" data-role="page" class="page type-interior pluginConfigurationPage withTabs" data-controller="__plugin/AutoOrganizeMovieJs">
     <div>
         <div class="content-primary">
 
@@ -40,7 +40,7 @@
                         </div>
                         <br />
                         <p>Supported Patterns</p>
-                        <table id="movie-table" class="ui-responsive">
+                        <table id="movie-folder-pattern-table" class="ui-responsive">
                             <thead>
                                 <tr>
                                     <th>Term</th>
@@ -86,6 +86,13 @@
                 <div is="emby-collapse" title="Movie file pattern">
                     <div class="collapseContent">
                         <br />
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label>
+                                <input type="checkbox" is="emby-checkbox" id="chkPreserveMovieFilename" />
+                                <span>Preserve original movie filename</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">Keep the incoming media filename and extension while still creating the configured movie folder.</div>
+                        </div>
                         <div class="inputContainer">
                             <input is="emby-input" id="txtMoviePattern" type="text" label="Movie pattern:" required />
                             <div class="fieldDescription moviePatternDescription"></div>
@@ -94,7 +101,7 @@
                         <br />
                         <p>Supported Patterns</p>
 
-                        <table id="movie-table" class="ui-responsive">
+                        <table id="movie-file-pattern-table" class="ui-responsive">
                             <thead>
                                 <tr>
                                     <th>Term</th>
@@ -175,7 +182,7 @@
                         <input type="checkbox" is="emby-checkbox" id="chkQueueLibScan" />
                         <span>Queue library scan on completion</span>
                     </label>
-                    <div class="fieldDescription checkboxFieldDescription">Queue a library scan on completion, if setted in movies and TV Shows, the library scan will be triggered once</div>
+                    <div class="fieldDescription checkboxFieldDescription">Queue a library scan on completion, when enabled for both movies and TV shows, the library scan is triggered once</div>
                 </div>
                 <div class="checkboxContainer checkboxContainer-withDescription">
                     <label>

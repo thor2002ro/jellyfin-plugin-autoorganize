@@ -1,97 +1,119 @@
-﻿function getMovieFileName(value) {
-    const movieName = 'Movie Name';
-    const movieYear = '2017';
-    const fileNameWithoutExt = movieName + '.' + movieYear + '.MULTI.1080p.BluRay.DTS.x264-UTT';
+function replaceAll(value, token, replacement) {
+    return String(value ?? '').split(token).join(replacement);
+}
 
-    const result = value.replace('%mn', movieName)
-        .replace('%m.n', movieName.replace(' ', '.'))
-        .replace('%m_n', movieName.replace(' ', '_'))
-        .replace('%my', movieYear)
-        .replace('%ext', 'mkv')
-        .replace('%fn', fileNameWithoutExt);
+function applyReplacements(value, replacements) {
+    let result = String(value ?? '');
+
+    for (const [token, replacement] of replacements) {
+        result = replaceAll(result, token, replacement);
+    }
 
     return result;
 }
 
-function getMovieFolderFileName(value) {
+function getMovieNamePreview(value) {
     const movieName = 'Movie Name';
     const movieYear = '2017';
-    const fileNameWithoutExt = movieName + '.' + movieYear + '.MULTI.1080p.BluRay.DTS.x264-UTT';
+    const fileNameWithoutExtension = movieName + '.' + movieYear + '.MULTI.1080p.BluRay.DTS.x264-UTT';
 
-    const result = value.replace('%mn', movieName)
-        .replace('%m.n', movieName.replace(' ', '.'))
-        .replace('%m_n', movieName.replace(' ', '_'))
-        .replace('%my', movieYear)
-        .replace('%ext', 'mkv')
-        .replace('%fn', fileNameWithoutExt);
+    return applyReplacements(value, [
+        ['%m.n', replaceAll(movieName, ' ', '.')],
+        ['%m_n', replaceAll(movieName, ' ', '_')],
+        ['%mn', movieName],
+        ['%my', movieYear],
+        ['%ext', 'mkv'],
+        ['%fn', fileNameWithoutExtension]
+    ]);
+}
 
-    return result;
+function getApiErrorMessage(error) {
+    const header = error?.headers && typeof error.headers.get === 'function'
+        ? error.headers.get('X-Application-Error-Code')
+        : null;
+
+    return header || error?.responseJSON?.detail || error?.responseText || error?.message ||
+        'Server returned status code ' + (error?.status ?? 'unknown') +
+        ' (' + (error?.statusText || 'unknown error') + ').';
+}
+
+function normalizeExtensions(value) {
+    return String(value ?? '')
+        .split(';')
+        .map(function (extension) { return extension.trim(); })
+        .filter(Boolean);
+}
+
+function setSelectOptions(select, options, includeBlank) {
+    select.replaceChildren();
+
+    if (includeBlank) {
+        select.appendChild(new Option('', ''));
+    }
+
+    for (const option of options) {
+        select.appendChild(new Option(option.display, option.value));
+    }
 }
 
 function loadPage(view, config) {
-    const movieOptions = config.MovieOptions;
+    const movieOptions = config.MovieOptions || {};
+    const watchLocations = Array.isArray(movieOptions.WatchLocations) ? movieOptions.WatchLocations : [];
+    const leftOverExtensions = Array.isArray(movieOptions.LeftOverFileExtensionsToDelete)
+        ? movieOptions.LeftOverFileExtensionsToDelete
+        : [];
 
-    view.querySelector('#chkEnableMovieSorting').checked = movieOptions.IsEnabled;
-    view.querySelector('#chkOverwriteExistingMovies').checked = movieOptions.OverwriteExistingFiles;
-    view.querySelector('#chkDeleteEmptyMovieFolders').checked = movieOptions.DeleteEmptyFolders;
-
-    view.querySelector('#txtMovieMinFileSize').value = movieOptions.MinFileSizeMb;
-    view.querySelector('#txtMoviePattern').value = movieOptions.MoviePattern;
-    view.querySelector('#txtWatchMovieFolder').value = movieOptions.WatchLocations[0] || '';
-
-    view.querySelector('#chkSubMovieFolders').checked = movieOptions.MovieFolder;
-    view.querySelector('#txtMovieFolderPattern').value = movieOptions.MovieFolderPattern;
-
-    view.querySelector('#txtDeleteLeftOverMovieFiles').value = movieOptions.LeftOverFileExtensionsToDelete.join(';');
-
-    view.querySelector('#chkExtendedClean').checked = movieOptions.ExtendedClean;
-
-    view.querySelector('#chkEnableMovieAutoDetect').checked = movieOptions.AutoDetectMovie;
-
-    view.querySelector('#copyOrMoveMovieFile').value = movieOptions.CopyOriginalFile.toString();
-
-    view.querySelector('#chkQueueLibScan').checked = movieOptions.QueueLibraryScan;
+    view.querySelector('#chkEnableMovieSorting').checked = Boolean(movieOptions.IsEnabled);
+    view.querySelector('#chkOverwriteExistingMovies').checked = Boolean(movieOptions.OverwriteExistingFiles);
+    view.querySelector('#chkDeleteEmptyMovieFolders').checked = Boolean(movieOptions.DeleteEmptyFolders);
+    view.querySelector('#txtMovieMinFileSize').value = movieOptions.MinFileSizeMb ?? 0;
+    view.querySelector('#txtMoviePattern').value = movieOptions.MoviePattern || '';
+    view.querySelector('#chkPreserveMovieFilename').checked = Boolean(movieOptions.PreserveOriginalFilename) || movieOptions.MoviePattern === '%fn.%ext';
+    view.querySelector('#txtWatchMovieFolder').value = watchLocations[0] || '';
+    view.querySelector('#chkSubMovieFolders').checked = Boolean(movieOptions.MovieFolder);
+    view.querySelector('#txtMovieFolderPattern').value = movieOptions.MovieFolderPattern || '';
+    view.querySelector('#txtDeleteLeftOverMovieFiles').value = leftOverExtensions.join(';');
+    view.querySelector('#chkExtendedClean').checked = Boolean(movieOptions.ExtendedClean);
+    view.querySelector('#chkEnableMovieAutoDetect').checked = Boolean(movieOptions.AutoDetectMovie);
+    view.querySelector('#copyOrMoveMovieFile').value = String(Boolean(movieOptions.CopyOriginalFile));
+    view.querySelector('#chkQueueLibScan').checked = Boolean(movieOptions.QueueLibraryScan);
 }
 
 function onSubmit(view) {
     ApiClient.getNamedConfiguration('autoorganize').then(function (config) {
-        const movieOptions = config.MovieOptions;
+        const movieOptions = config.MovieOptions || {};
+        const minFileSize = Number.parseInt(view.querySelector('#txtMovieMinFileSize').value, 10);
 
+        config.MovieOptions = movieOptions;
         movieOptions.IsEnabled = view.querySelector('#chkEnableMovieSorting').checked;
-        movieOptions.OverwriteExistingEpisodes = view.querySelector('#chkOverwriteExistingMovies').checked;
+        movieOptions.OverwriteExistingFiles = view.querySelector('#chkOverwriteExistingMovies').checked;
         movieOptions.DeleteEmptyFolders = view.querySelector('#chkDeleteEmptyMovieFolders').checked;
-
-        movieOptions.MinFileSizeMb = view.querySelector('#txtMovieMinFileSize').value;
+        movieOptions.MinFileSizeMb = Number.isNaN(minFileSize) ? 0 : Math.max(0, minFileSize);
         movieOptions.MoviePattern = view.querySelector('#txtMoviePattern').value;
-        movieOptions.LeftOverFileExtensionsToDelete = view.querySelector('#txtDeleteLeftOverMovieFiles').value.split(';');
-
+        movieOptions.PreserveOriginalFilename = view.querySelector('#chkPreserveMovieFilename').checked;
+        movieOptions.LeftOverFileExtensionsToDelete = normalizeExtensions(view.querySelector('#txtDeleteLeftOverMovieFiles').value);
         movieOptions.ExtendedClean = view.querySelector('#chkExtendedClean').checked;
-
         movieOptions.AutoDetectMovie = view.querySelector('#chkEnableMovieAutoDetect').checked;
-        movieOptions.DefaultMovieLibraryPath = view.querySelector('#selectMovieFolder').value;
-
+        movieOptions.DefaultMovieLibraryPath = view.querySelector('#selectMovieFolder').value || null;
         movieOptions.MovieFolder = view.querySelector('#chkSubMovieFolders').checked;
         movieOptions.MovieFolderPattern = view.querySelector('#txtMovieFolderPattern').value;
 
-        const watchLocation = view.querySelector('#txtWatchMovieFolder').value;
+        const watchLocation = view.querySelector('#txtWatchMovieFolder').value.trim();
         movieOptions.WatchLocations = watchLocation ? [watchLocation] : [];
-
         movieOptions.CopyOriginalFile = view.querySelector('#copyOrMoveMovieFile').value === 'true';
-
         movieOptions.QueueLibraryScan = view.querySelector('#chkQueueLibScan').checked;
 
-        ApiClient.updateNamedConfiguration('autoorganize', config).then(Dashboard.processServerConfigurationUpdateResult, Dashboard.processErrorResponse);
-    });
+        return ApiClient.updateNamedConfiguration('autoorganize', config);
+    }).then(Dashboard.processServerConfigurationUpdateResult, Dashboard.processErrorResponse);
 
     return false;
 }
 
-function onApiFailure(e) {
+function onApiFailure(error) {
     Loading.hide();
-
     Dashboard.alert({
         title: 'Error',
-        text: 'Error: ' + e.headers.get('X-Application-Error-Code')
+        text: 'Error: ' + getApiErrorMessage(error)
     });
 }
 
@@ -115,42 +137,41 @@ function getTabs() {
         }];
 }
 
-export default function (view, params) {
+export default function (view) {
     function updateMoviePatternHelp() {
-        let value = view.querySelector('#txtMoviePattern').value;
-        value = getMovieFileName(value);
+        const pattern = view.querySelector('#chkPreserveMovieFilename').checked
+            ? '%fn.%ext'
+            : view.querySelector('#txtMoviePattern').value;
+        const value = getMovieNamePreview(pattern);
+        view.querySelector('.moviePatternDescription').textContent = 'Result: ' + value;
+    }
 
-        const replacementHtmlResult = 'Result: ' + value;
-
-        view.querySelector('.moviePatternDescription').innerHTML = replacementHtmlResult;
+    function toggleMoviePattern() {
+        view.querySelector('#txtMoviePattern').disabled =
+            view.querySelector('#chkPreserveMovieFilename').checked;
+        updateMoviePatternHelp();
     }
 
     function updateMovieFolderPatternHelp() {
-        let value = view.querySelector('#txtMovieFolderPattern').value;
-        value = getMovieFolderFileName(value);
-
-        const replacementHtmlResult = 'Result: ' + value;
-
-        view.querySelector('.movieFolderPatternDescription').innerHTML = replacementHtmlResult;
+        const value = getMovieNamePreview(view.querySelector('#txtMovieFolderPattern').value);
+        view.querySelector('.movieFolderPatternDescription').textContent = 'Result: ' + value;
     }
 
     function toggleMovieFolderPattern() {
-        if (view.querySelector('#chkSubMovieFolders').checked) {
-            view.querySelector('.fldSelectMovieFolderPattern').classList.remove('hide');
-        } else {
-            view.querySelector('.fldSelectMovieFolderPattern').classList.add('hide');
-        }
+        view.querySelector('.fldSelectMovieFolderPattern').classList.toggle(
+            'hide',
+            !view.querySelector('#chkSubMovieFolders').checked);
     }
 
-    function selectWatchFolder(e) {
+    function selectWatchFolder() {
         const picker = new Dashboard.DirectoryBrowser();
 
         picker.show({
-
             callback: function (path) {
                 if (path) {
                     view.querySelector('#txtWatchMovieFolder').value = path;
                 }
+
                 picker.close();
             },
             header: 'Select Watch Folder',
@@ -159,85 +180,66 @@ export default function (view, params) {
     }
 
     function toggleMovieLocation() {
-        if (view.querySelector('#chkEnableMovieAutoDetect').checked) {
-            view.querySelector('.fldSelectMovieFolder').classList.remove('hide');
-            view.querySelector('#selectMovieFolder').setAttribute('required', 'required');
-        } else {
-            view.querySelector('.fldSelectMovieFolder').classList.add('hide');
-            view.querySelector('#selectMovieFolder').removeAttribute('required');
-        }
-    }
+        const locationField = view.querySelector('.fldSelectMovieFolder');
+        const locationSelect = view.querySelector('#selectMovieFolder');
 
-    function validate() {
-        if (view.querySelector('#txtMoviePattern').value.includes('/')) {
-            // TODO Validate
+        if (view.querySelector('#chkEnableMovieAutoDetect').checked) {
+            locationField.classList.remove('hide');
+            locationSelect.setAttribute('required', 'required');
+        } else {
+            locationField.classList.add('hide');
+            locationSelect.removeAttribute('required');
         }
     }
 
     function populateMovieLocation(config) {
-        const movieOptions = config.MovieOptions;
+        const movieOptions = config.MovieOptions || {};
 
         ApiClient.getVirtualFolders().then(function (result) {
-            const mediasLocations = [];
+            const mediaLocations = [];
 
-            for (let n = 0; n < result.length; n++) {
-                const virtualFolder = result[n];
+            for (const virtualFolder of result || []) {
+                if (virtualFolder.CollectionType !== 'movies') {
+                    continue;
+                }
 
-                for (let i = 0, length = virtualFolder.Locations.length; i < length; i++) {
-                    const location = {
-                        value: virtualFolder.Locations[i],
-                        display: virtualFolder.Name + ': ' + virtualFolder.Locations[i]
-                    };
-
-                    if (virtualFolder.CollectionType == 'movies') {
-                        mediasLocations.push(location);
-                    }
+                for (const location of virtualFolder.Locations || []) {
+                    mediaLocations.push({
+                        value: location,
+                        display: (virtualFolder.Name || 'Movies') + ': ' + location
+                    });
                 }
             }
 
-            let mediasFolderHtml = mediasLocations.map(function (s) {
-                return '<option value="' + s.value + '">' + s.display + '</option>';
-            }).join('');
-
-            if (mediasLocations.length > 1) {
-                // If the user has multiple folders, add an empty item to enforce a manual selection
-                mediasFolderHtml = '<option value=""></option>' + mediasFolderHtml;
-            }
-
-            view.querySelector('#selectMovieFolder').innerHTML = mediasFolderHtml;
-
-            view.querySelector('#selectMovieFolder').value = movieOptions.DefaultMovieLibraryPath;
+            const select = view.querySelector('#selectMovieFolder');
+            setSelectOptions(select, mediaLocations, mediaLocations.length > 1);
+            select.value = movieOptions.DefaultMovieLibraryPath || '';
         }, onApiFailure);
     }
 
     view.querySelector('#btnSelectWatchMovieFolder').addEventListener('click', selectWatchFolder);
-
-    view.querySelector('#txtMoviePattern').addEventListener('change', updateMoviePatternHelp);
-    view.querySelector('#txtMoviePattern').addEventListener('keyup', updateMoviePatternHelp);
-
-    view.querySelector('#chkSubMovieFolders').addEventListener('click', toggleMovieFolderPattern);
-    view.querySelector('#txtMovieFolderPattern').addEventListener('change', updateMovieFolderPatternHelp);
-    view.querySelector('#txtMovieFolderPattern').addEventListener('keyup', updateMovieFolderPatternHelp);
-
+    view.querySelector('#txtMoviePattern').addEventListener('input', updateMoviePatternHelp);
+    view.querySelector('#chkPreserveMovieFilename').addEventListener('change', toggleMoviePattern);
+    view.querySelector('#chkSubMovieFolders').addEventListener('change', toggleMovieFolderPattern);
+    view.querySelector('#txtMovieFolderPattern').addEventListener('input', updateMovieFolderPatternHelp);
     view.querySelector('#chkEnableMovieAutoDetect').addEventListener('change', toggleMovieLocation);
 
-    view.querySelector('.libraryFileOrganizerForm').addEventListener('submit', function (e) {
-        e.preventDefault();
-        validate();
+    view.querySelector('.libraryFileOrganizerForm').addEventListener('submit', function (event) {
+        event.preventDefault();
         onSubmit(view);
         return false;
     });
 
-    view.addEventListener('viewshow', function (e) {
+    view.addEventListener('viewshow', function () {
         LibraryMenu.setTabs('autoorganize', 2, getTabs);
 
         ApiClient.getNamedConfiguration('autoorganize').then(function (config) {
             loadPage(view, config);
-            updateMoviePatternHelp();
+            toggleMoviePattern();
             updateMovieFolderPatternHelp();
             populateMovieLocation(config);
             toggleMovieLocation();
             toggleMovieFolderPattern();
-        });
+        }, onApiFailure);
     });
 }

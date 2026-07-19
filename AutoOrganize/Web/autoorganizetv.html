@@ -1,4 +1,4 @@
-﻿<div id="libraryFileOrganizerPage" data-role="page" class="page type-interior pluginConfigurationPage withTabs" data-controller="__plugin/AutoOrganizeTvJs">
+<div id="libraryFileOrganizerTvPage" data-role="page" class="page type-interior pluginConfigurationPage withTabs" data-controller="__plugin/AutoOrganizeTvJs">
     <div>
         <div class="content-primary">
 
@@ -32,6 +32,13 @@
                 <div class="inputContainer">
                     <input is="emby-input" id="txtSeasonZeroName" type="text" label="Season zero folder name:" required />
                     <div class="fieldDescription"></div>
+                </div>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input type="checkbox" is="emby-checkbox" id="chkAlwaysCreateSeasonFolders" />
+                        <span>Always place episodes in season folders</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">Create the configured season directory even when an existing series currently stores episodes directly in its root.</div>
                 </div>
 
                 <div is="emby-collapse" title="Series directory pattern">
@@ -87,12 +94,19 @@
                 <div is="emby-collapse" title="Episode file pattern">
                     <div class="collapseContent">
                         <br />
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label>
+                                <input type="checkbox" is="emby-checkbox" id="chkPreserveEpisodeFilename" />
+                                <span>Preserve original episode filename</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">Keep the incoming media filename and extension. The stored episode patterns remain available when this option is disabled.</div>
+                        </div>
                         <div class="inputContainer">
                             <input is="emby-input" id="txtEpisodePattern" type="text" label="Episode pattern:" required />
                             <div class="fieldDescription episodePatternDescription"></div>
                         </div>
                         <div class="inputContainer">
-                            <input is="emby-input" id="txtMultiEpisodePattern" type="text" label="Mutli-episode pattern:" required />
+                            <input is="emby-input" id="txtMultiEpisodePattern" type="text" label="Multi-episode pattern:" required />
                             <div class="fieldDescription multiEpisodePatternDescription"></div>
                         </div>
 
@@ -220,7 +234,7 @@
                         <input type="checkbox" is="emby-checkbox" id="chkQueueLibScan" />
                         <span>Queue library scan on completion</span>
                     </label>
-                    <div class="fieldDescription checkboxFieldDescription">Queue a library scan on completion, if setted in movies and TV Shows, the library scan will be triggered once</div>
+                    <div class="fieldDescription checkboxFieldDescription">Queue a library scan on completion, when enabled for both movies and TV shows, the library scan is triggered once</div>
                 </div>
                 <div class="checkboxContainer checkboxContainer-withDescription">
                     <label>
