@@ -45,18 +45,20 @@ public class TvFileOrganizationOptions
     public TvFileOrganizationOptions()
     {
         MinFileSizeMb = 50;
-        LeftOverFileExtensionsToDelete = new List<string>();
+        LeftOverFileExtensionsToDelete = new List<string> { "nfo" };
         WatchLocations = new List<string>();
         EpisodeNamePattern = "%sn - %sx%0e - %en.%ext";
         MultiEpisodeNamePattern = "%sn - %sx%0e-x%0ed - %en.%ext";
         SeasonFolderPattern = "Season %s";
         SeasonZeroFolderName = "Season 0";
         SeriesFolderPattern = "%fn";
-        PreserveOriginalFilename = false;
-        AlwaysCreateSeasonFolders = false;
+        PreserveOriginalFilename = true;
+        AlwaysCreateSeasonFolders = true;
+        DeleteEmptyFolders = true;
         CopyOriginalFile = false;
         AutoDetectSeries = true;
         QueueLibraryScan = false;
         ExtendedClean = false;
+        RequireApproval = true;
     }
 }

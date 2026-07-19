@@ -39,15 +39,17 @@ public class MovieFileOrganizationOptions
     public MovieFileOrganizationOptions()
     {
         MinFileSizeMb = 50;
-        LeftOverFileExtensionsToDelete = new List<string>();
+        LeftOverFileExtensionsToDelete = new List<string> { "nfo" };
         MoviePattern = "%fn.%ext";
-        PreserveOriginalFilename = false;
+        PreserveOriginalFilename = true;
         WatchLocations = new List<string>();
+        DeleteEmptyFolders = true;
         CopyOriginalFile = false;
         AutoDetectMovie = true;
-        MovieFolder = false;
+        MovieFolder = true;
         MovieFolderPattern = "%mn (%my)";
         QueueLibraryScan = false;
         ExtendedClean = false;
+        RequireApproval = true;
     }
 }

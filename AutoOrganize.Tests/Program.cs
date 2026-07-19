@@ -219,6 +219,11 @@ internal static class Program
             };
             Equal("custom-multi.%ext", OrganizationOptionResolver.GetEpisodePattern(options, true));
         });
+        Add("new organizers require approval by default", () =>
+        {
+            True(new TvFileOrganizationOptions().RequireApproval);
+            True(new MovieFileOrganizationOptions().RequireApproval);
+        });
         Add("movie preserve option overrides the stored pattern", () =>
         {
             var options = new MovieFileOrganizationOptions
@@ -605,18 +610,23 @@ internal static class Program
             True(OrganizationOptionResolver.PatternRequiresEpisodeTitle("%e_n.%ext"));
             False(OrganizationOptionResolver.PatternRequiresEpisodeTitle("%fn.%ext"));
         });
-        Add("new TV options preserve legacy rename behavior", () =>
+        Add("new TV options preserve original names and use season folders by default", () =>
         {
             var options = new TvFileOrganizationOptions();
-            False(options.PreserveOriginalFilename);
-            False(options.AlwaysCreateSeasonFolders);
+            True(options.PreserveOriginalFilename);
+            True(options.AlwaysCreateSeasonFolders);
+            True(options.DeleteEmptyFolders);
+            SequenceEqual(new[] { "nfo" }, options.LeftOverFileExtensionsToDelete);
             True(options.AutoDetectSeries);
         });
-        Add("new movie options retain the legacy preservation pattern", () =>
+        Add("new movie options delete empty folders by default", () =>
         {
             var options = new MovieFileOrganizationOptions();
-            False(options.PreserveOriginalFilename);
+            True(options.PreserveOriginalFilename);
             Equal("%fn.%ext", options.MoviePattern);
+            True(options.DeleteEmptyFolders);
+            SequenceEqual(new[] { "nfo" }, options.LeftOverFileExtensionsToDelete);
+            True(options.MovieFolder);
             True(options.AutoDetectMovie);
         });
 
