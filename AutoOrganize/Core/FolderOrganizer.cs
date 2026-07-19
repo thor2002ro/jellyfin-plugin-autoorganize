@@ -1,0 +1,372 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using AutoOrganize.Model;
+using Emby.Naming.Common;
+using Emby.Naming.Video;
+using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Providers;
+using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.IO;
+using Microsoft.Extensions.Logging;
+
+namespace AutoOrganize.Core;
+
+public sealed class FolderOrganizer
+{
+	private static readonly object PluginLogLock = new object();
+
+	private readonly ILibraryMonitor _libraryMonitor;
+	private readonly ILibraryManager _libraryManager;
+	private readonly ILoggerFactory _loggerFactory;
+	private readonly ILogger<FolderOrganizer> _logger;
+	private readonly IFileSystem _fileSystem;
+	private readonly IFileOrganizationService _organizationService;
+	private readonly IProviderManager _providerManager;
+	private readonly NamingOptions _namingOptions;
+	private readonly string? _logDirectoryPath;
+
+	public FolderOrganizer(ILibraryManager libraryManager, ILoggerFactory loggerFactory, IFileSystem fileSystem, ILibraryMonitor libraryMonitor, IFileOrganizationService organizationService, IProviderManager providerManager, NamingOptions namingOptions, string? logDirectoryPath = null)
+	{
+		_libraryManager = libraryManager;
+		_loggerFactory = loggerFactory;
+		_logger = loggerFactory.CreateLogger<FolderOrganizer>();
+		_fileSystem = fileSystem;
+		_libraryMonitor = libraryMonitor;
+		_organizationService = organizationService;
+		_providerManager = providerManager;
+		_namingOptions = namingOptions;
+		_logDirectoryPath = logDirectoryPath;
+	}
+
+	public Task Organize(TvFileOrganizationOptions options, IProgress<double> progress, CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(options);
+		var organizer = new EpisodeFileOrganizer(_organizationService, _fileSystem, _loggerFactory.CreateLogger<EpisodeFileOrganizer>(), _libraryManager, _libraryMonitor, _providerManager, _namingOptions);
+		return Organize(
+			"TV",
+			options.WatchLocations,
+			options.MinFileSizeMb,
+			options.DeleteEmptyFolders,
+			options.ExtendedClean,
+			options.LeftOverFileExtensionsToDelete,
+			(path, token) => organizer.OrganizeEpisodeFile(path, options, options.RequireApproval, token),
+			progress,
+			cancellationToken);
+	}
+
+	public Task Organize(MovieFileOrganizationOptions options, IProgress<double> progress, CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(options);
+		var organizer = new MovieFileOrganizer(_organizationService, _fileSystem, _loggerFactory.CreateLogger<MovieFileOrganizer>(), _libraryManager, _libraryMonitor, _providerManager, _namingOptions);
+		return Organize(
+			"movie",
+			options.WatchLocations,
+			options.MinFileSizeMb,
+			options.DeleteEmptyFolders,
+			options.ExtendedClean,
+			options.LeftOverFileExtensionsToDelete,
+			(path, token) => organizer.OrganizeMovieFile(path, options, options.OverwriteExistingFiles, options.RequireApproval, token),
+			progress,
+			cancellationToken);
+	}
+
+	private async Task Organize(
+		string mediaType,
+		IEnumerable<string>? configuredWatchLocations,
+		int minFileSizeMb,
+		bool deleteEmptyFolders,
+		bool extendedClean,
+		IEnumerable<string>? configuredDeleteExtensions,
+		Func<string, CancellationToken, Task<FileOrganizationResult>> organizeFile,
+		IProgress<double> progress,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(progress);
+		if (minFileSizeMb < 0)
+		{
+			throw new ArgumentOutOfRangeException(nameof(minFileSizeMb), "Minimum file size cannot be negative.");
+		}
+		long minimumFileSize = (long)minFileSizeMb * 1024 * 1024;
+		List<string> configuredLocations = (configuredWatchLocations ?? Array.Empty<string>())
+			.Where(path => !string.IsNullOrWhiteSpace(path))
+			.ToList();
+		List<string> libraryFolderPaths = (from path in _libraryManager.GetVirtualFolders().SelectMany(folder => folder.Locations ?? Array.Empty<string>())
+			where !string.IsNullOrWhiteSpace(path)
+			select path).ToList();
+		var checkedLocations = configuredLocations
+			.Select(path => new { Path = path, Error = GetWatchLocationError(path, mediaType, libraryFolderPaths) })
+			.ToList();
+		List<string> skippedLocations = checkedLocations
+			.Select(location => location.Error)
+			.Where(message => message != null)
+			.Cast<string>()
+			.ToList();
+		List<string> watchLocations = checkedLocations
+			.Where(location => location.Error == null)
+			.Select(location => PathSafety.Normalize(location.Path))
+			.Distinct(PathSafety.PathComparer)
+			.ToList();
+		FileOrganizationResult scanLog = CreateScanLog(mediaType, $"Scan started. Configured {configuredLocations.Count}; valid {watchLocations.Count}; minimum size {minFileSizeMb} MB.", FileSortingStatus.Success);
+		_organizationService.SaveResult(scanLog, cancellationToken);
+		AddPluginLogLine($"{mediaType} scan started. Configured={configuredLocations.Count}; valid={watchLocations.Count}; minSizeMb={minFileSizeMb}.");
+		foreach (string skippedLocation in skippedLocations)
+		{
+			AddPluginLogLine($"{mediaType} watch folder skipped: {skippedLocation}");
+		}
+		List<FileSystemMetadata> foundFiles = watchLocations.SelectMany(GetFilesToOrganize).ToList();
+		List<FileSystemMetadata> eligibleFiles = (from file in foundFiles.OrderBy(_fileSystem.GetCreationTimeUtc)
+			where CanOrganize(file, minimumFileSize)
+			select file).ToList();
+		AddPluginLogLine($"{mediaType} scan found {foundFiles.Count} file(s), {eligibleFiles.Count} eligible video file(s).");
+		var processedFolders = new HashSet<string>(PathSafety.PathComparer);
+		int succeeded = 0;
+		int detected = 0;
+		int failed = 0;
+		int skipped = 0;
+		progress.Report(10);
+		for (int index = 0; index < eligibleFiles.Count; index++)
+		{
+			FileSystemMetadata file = eligibleFiles[index];
+			cancellationToken.ThrowIfCancellationRequested();
+			try
+			{
+				FileOrganizationResult result = await organizeFile(file.FullName, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+				string? directory = Path.GetDirectoryName(file.FullName);
+				if (result.Status == FileSortingStatus.Success && !string.IsNullOrEmpty(directory))
+				{
+					processedFolders.Add(directory);
+				}
+				switch (result.Status)
+				{
+					case FileSortingStatus.Success:
+						succeeded++;
+						break;
+					case FileSortingStatus.Detected:
+						detected++;
+						break;
+					case FileSortingStatus.SkippedExisting:
+						skipped++;
+						break;
+					default:
+						failed++;
+						break;
+				}
+				AddPluginLogLine($"{mediaType} file {result.Status}: {file.FullName} -> {result.TargetPath ?? "(not resolved)"} {result.StatusMessage}");
+			}
+			catch (OperationCanceledException)
+			{
+				throw;
+			}
+			catch (Exception exception)
+			{
+				failed++;
+				AddPluginLogLine($"{mediaType} file failed: {file.FullName} {exception.Message}");
+				_logger.LogError(exception, "Error organizing {MediaType} file {Path}", mediaType, file.FullName);
+			}
+			progress.Report(10 + 89.0 * (index + 1) / eligibleFiles.Count);
+		}
+		cancellationToken.ThrowIfCancellationRequested();
+		progress.Report(99);
+		List<string> deleteExtensions = (configuredDeleteExtensions ?? Array.Empty<string>())
+			.Where(extension => extension != null)
+			.Select(extension => extension.Trim().TrimStart('.'))
+			.Where(extension => extension.Length > 0)
+			.Select(extension => "." + extension)
+			.ToList();
+		Clean(processedFolders, watchLocations, deleteEmptyFolders, deleteExtensions, mediaType, cancellationToken);
+		if (extendedClean)
+		{
+			Clean(watchLocations, watchLocations, deleteEmptyFolders, deleteExtensions, mediaType, cancellationToken);
+		}
+		SaveScanLog(scanLog, mediaType, configuredLocations.Count, watchLocations.Count, skippedLocations, foundFiles.Count, eligibleFiles.Count, succeeded, detected, skipped, failed, minFileSizeMb, cancellationToken);
+		progress.Report(100);
+	}
+
+	private bool CanOrganize(FileSystemMetadata file, long minimumFileSize)
+	{
+		try
+		{
+			return VideoResolver.IsVideoFile(file.FullName, _namingOptions) && file.Length >= minimumFileSize;
+		}
+		catch (Exception exception)
+		{
+			_logger.LogError(exception, "Error checking media file {FileName}", file.Name);
+			return false;
+		}
+	}
+
+	private string? GetWatchLocationError(string path, string mediaType, IReadOnlyList<string> libraryFolderPaths)
+	{
+		if (!PathSafety.TryNormalize(path, out string normalizedPath) || !Directory.Exists(normalizedPath))
+		{
+			_logger.LogWarning("{MediaType} watch folder {WatchFolder} is not a valid existing absolute path and will be skipped", mediaType, path);
+			return $"{path}: not an existing absolute path";
+		}
+		if (libraryFolderPaths.Any(libraryPath => PathSafety.PathsOverlap(libraryPath, normalizedPath) && !PathSafety.HasHiddenSegmentUnderRoot(libraryPath, normalizedPath)))
+		{
+			_logger.LogWarning("{MediaType} watch folder {WatchFolder} overlaps a Jellyfin library and will be skipped", mediaType, path);
+			return $"{path}: overlaps a Jellyfin library";
+		}
+		return null;
+	}
+
+	private FileOrganizationResult CreateScanLog(string mediaType, string message, FileSortingStatus status)
+	{
+		string root = string.IsNullOrWhiteSpace(_logDirectoryPath) ? Path.GetTempPath() : _logDirectoryPath;
+		return new FileOrganizationResult
+		{
+			Date = DateTime.UtcNow,
+			OriginalPath = Path.Combine(root, "AutoOrganize", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff") + "-" + mediaType + ".log"),
+			OriginalFileName = mediaType + " scan",
+			ExtractedName = mediaType + " scan",
+			Status = status,
+			StatusMessage = message,
+			Type = FileOrganizerType.Log
+		};
+	}
+
+	private void SaveScanLog(FileOrganizationResult scanLog, string mediaType, int configuredCount, int watchCount, List<string> skippedLocations, int foundCount, int eligibleCount, int succeeded, int detected, int skipped, int failed, int minFileSizeMb, CancellationToken cancellationToken)
+	{
+		string skippedMessage = skippedLocations.Count == 0
+			? string.Empty
+			: " Skipped watch folders: " + string.Join("; ", skippedLocations) + ".";
+		string message = $"Scanned {watchCount} of {configuredCount} configured {mediaType} watch folder(s); found {foundCount} file(s), {eligibleCount} eligible video file(s) at or above {minFileSizeMb} MB. Organized {succeeded}, detected {detected}, skipped {skipped}, failed {failed}.{skippedMessage}";
+		AddPluginLogLine(message);
+		scanLog.Date = DateTime.UtcNow;
+		scanLog.Status = watchCount == 0 && configuredCount > 0 ? FileSortingStatus.Failure : FileSortingStatus.Success;
+		scanLog.StatusMessage = message;
+		_organizationService.SaveResult(scanLog, cancellationToken);
+	}
+
+	private void AddPluginLogLine(string message)
+	{
+		string line = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz") + " " + message;
+		AppendPluginLogLines(new[] { line });
+	}
+
+	private void AppendPluginLogLines(IReadOnlyList<string> lines)
+	{
+		if (string.IsNullOrWhiteSpace(_logDirectoryPath) || lines.Count == 0)
+		{
+			return;
+		}
+		try
+		{
+			string directory = Path.Combine(_logDirectoryPath, "AutoOrganize");
+			Directory.CreateDirectory(directory);
+			string path = Path.Combine(directory, DateTimeOffset.Now.ToString("yyyy-MM-dd") + ".log");
+			string text = string.Join(Environment.NewLine, lines) + Environment.NewLine;
+			lock (PluginLogLock)
+			{
+				File.AppendAllText(path, text);
+			}
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			_logger.LogWarning(exception, "Unable to write Auto Organize plugin log");
+		}
+	}
+
+	private List<FileSystemMetadata> GetFilesToOrganize(string path)
+	{
+		try
+		{
+			return _fileSystem.GetFiles(path, recursive: true)
+				.Where(file => !PathSafety.TraversesSymbolicLink(path, file.FullName))
+				.ToList();
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			_logger.LogError(exception, "Error getting files from {Path}", path);
+			return new List<FileSystemMetadata>();
+		}
+	}
+
+	private void Clean(IEnumerable<string> paths, List<string> watchLocations, bool deleteEmptyFolders, List<string> deleteExtensions, string mediaType, CancellationToken cancellationToken)
+	{
+		foreach (string path in paths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!watchLocations.Any(root => PathSafety.IsSameOrSubPath(root, path)))
+			{
+				_logger.LogWarning("Refusing to clean path outside configured {MediaType} watch folders: {Path}", mediaType, path);
+				continue;
+			}
+			if (deleteExtensions.Count > 0)
+			{
+				DeleteLeftOverFiles(path, deleteExtensions, watchLocations, cancellationToken);
+			}
+			if (deleteEmptyFolders)
+			{
+				DeleteEmptyFolders(path, watchLocations, mediaType, cancellationToken);
+			}
+		}
+	}
+
+	private void DeleteLeftOverFiles(string path, IEnumerable<string> extensions, List<string> watchLocations, CancellationToken cancellationToken)
+	{
+		List<string> files;
+		try
+		{
+			files = _fileSystem.GetFilePaths(path, extensions.ToArray(), enableCaseSensitiveExtensions: false, recursive: true).ToList();
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			_logger.LogError(exception, "Error enumerating leftover files in {Path}", path);
+			return;
+		}
+		foreach (string file in files)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			try
+			{
+				string? root = watchLocations.FirstOrDefault(candidate => PathSafety.IsSameOrSubPath(candidate, file));
+				if (root != null && !PathSafety.TraversesSymbolicLink(root, file))
+				{
+					_fileSystem.DeleteFile(file);
+				}
+				else
+				{
+					_logger.LogWarning("Refusing to delete leftover file through a symbolic link: {Path}", file);
+				}
+			}
+			catch (Exception exception)
+			{
+				_logger.LogError(exception, "Error deleting file {Path}", file);
+			}
+		}
+	}
+
+	private void DeleteEmptyFolders(string path, List<string> watchLocations, string mediaType, CancellationToken cancellationToken)
+	{
+		try
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			foreach (string directory in _fileSystem.GetDirectoryPaths(path))
+			{
+				string? root = watchLocations.FirstOrDefault(candidate => PathSafety.IsSameOrSubPath(candidate, directory));
+				if (root != null && !PathSafety.TraversesSymbolicLink(root, directory))
+				{
+					DeleteEmptyFolders(directory, watchLocations, mediaType, cancellationToken);
+				}
+				else
+				{
+					_logger.LogWarning("Refusing to clean directory through a symbolic link: {Path}", directory);
+				}
+			}
+			if (!_fileSystem.GetFileSystemEntryPaths(path).Any() && !watchLocations.Contains(path, PathSafety.PathComparer))
+			{
+				_logger.LogDebug("Deleting empty {MediaType} directory {Directory}", mediaType, path);
+				Directory.Delete(path, recursive: false);
+			}
+		}
+		catch (Exception exception) when (exception is UnauthorizedAccessException or IOException)
+		{
+			_logger.LogError(exception, "Failed to delete empty {MediaType} directory {Directory}", mediaType, path);
+		}
+	}
+}

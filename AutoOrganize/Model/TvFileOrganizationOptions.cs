@@ -40,6 +40,8 @@ public class TvFileOrganizationOptions
 
     public bool QueueLibraryScan { get; set; }
 
+    public bool RequireApproval { get; set; }
+
     public TvFileOrganizationOptions()
     {
         MinFileSizeMb = 50;
@@ -53,6 +55,7 @@ public class TvFileOrganizationOptions
         PreserveOriginalFilename = false;
         AlwaysCreateSeasonFolders = false;
         CopyOriginalFile = false;
+        AutoDetectSeries = true;
         QueueLibraryScan = false;
         ExtendedClean = false;
     }

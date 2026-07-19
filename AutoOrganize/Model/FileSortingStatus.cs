@@ -4,5 +4,6 @@ public enum FileSortingStatus
 {
 	Success,
 	Failure,
-	SkippedExisting
+	SkippedExisting,
+	Detected
 }

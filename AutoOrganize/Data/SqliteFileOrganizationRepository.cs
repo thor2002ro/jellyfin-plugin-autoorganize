@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AutoOrganize.Model;
 using MediaBrowser.Controller;
+using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Querying;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
@@ -192,79 +193,164 @@ public sealed class SqliteFileOrganizationRepository : IFileOrganizationReposito
 	public void SaveResult(SmartMatchResult result, CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(result, "result");
-		cancellationToken.ThrowIfCancellationRequested();
-		ExecuteWrite(delegate(SqliteConnection connection, SqliteTransaction transaction)
+		ArgumentException.ThrowIfNullOrWhiteSpace(result.ItemName, "result.ItemName");
+		ExecuteWrite((connection, transaction) => SaveSmartMatch(connection, transaction, result), cancellationToken);
+	}
+
+	public Task AddSmartMatchString(string itemName, string displayName, FileOrganizerType organizerType, string matchString, CancellationToken cancellationToken)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(itemName);
+		ArgumentException.ThrowIfNullOrWhiteSpace(matchString);
+		return ExecuteWriteAsync((connection, transaction, token) =>
 		{
-			using SqliteCommand sqliteCommand = connection.CreateCommand();
-			sqliteCommand.Transaction = transaction;
-			sqliteCommand.CommandText = "INSERT INTO SmartMatch (Id, ItemName, DisplayName, OrganizerType, MatchStrings)\nVALUES ($Id, $ItemName, $DisplayName, $OrganizerType, $MatchStrings)\nON CONFLICT(Id) DO UPDATE SET\n    ItemName = excluded.ItemName,\n    DisplayName = excluded.DisplayName,\n    OrganizerType = excluded.OrganizerType,\n    MatchStrings = excluded.MatchStrings;";
-			AddParameter(sqliteCommand, "$Id", result.Id.ToByteArray());
-			AddParameter(sqliteCommand, "$ItemName", result.ItemName);
-			AddParameter(sqliteCommand, "$DisplayName", result.DisplayName);
-			AddParameter(sqliteCommand, "$OrganizerType", result.OrganizerType.ToString());
-			AddParameter(sqliteCommand, "$MatchStrings", JsonSerializer.Serialize(result.MatchStrings));
-			sqliteCommand.ExecuteNonQuery();
+			token.ThrowIfCancellationRequested();
+			var smartMatch = new SmartMatchResult
+			{
+				ItemName = itemName,
+				DisplayName = displayName,
+				OrganizerType = organizerType
+			};
+			smartMatch.MatchStrings.Add(matchString);
+			SaveSmartMatch(connection, transaction, smartMatch);
+			return Task.CompletedTask;
+		}, cancellationToken);
+	}
+
+	private void SaveSmartMatch(SqliteConnection connection, SqliteTransaction transaction, SmartMatchResult incoming)
+	{
+		SmartMatchResult? existing;
+		using (SqliteCommand selectCommand = connection.CreateCommand())
+		{
+			selectCommand.Transaction = transaction;
+			selectCommand.CommandText = "SELECT Id, ItemName, DisplayName, OrganizerType, MatchStrings FROM SmartMatch WHERE OrganizerType = $OrganizerType COLLATE NOCASE AND ItemName = $ItemName COLLATE NOCASE LIMIT 1;";
+			AddParameter(selectCommand, "$OrganizerType", incoming.OrganizerType.ToString());
+			AddParameter(selectCommand, "$ItemName", incoming.ItemName);
+			using SqliteDataReader reader = selectCommand.ExecuteReader();
+			existing = reader.Read() && TryReadSmartMatch(reader, out SmartMatchResult? result) ? result : null;
+		}
+
+		if (existing == null)
+		{
+			using SqliteCommand upsertCommand = connection.CreateCommand();
+			upsertCommand.Transaction = transaction;
+			upsertCommand.CommandText = "INSERT INTO SmartMatch (Id, ItemName, DisplayName, OrganizerType, MatchStrings)\nVALUES ($Id, $ItemName, $DisplayName, $OrganizerType, $MatchStrings)\nON CONFLICT(Id) DO UPDATE SET\n    ItemName = excluded.ItemName,\n    DisplayName = excluded.DisplayName,\n    OrganizerType = excluded.OrganizerType,\n    MatchStrings = excluded.MatchStrings;";
+			AddParameter(upsertCommand, "$Id", incoming.Id.ToByteArray());
+			AddParameter(upsertCommand, "$ItemName", incoming.ItemName);
+			AddParameter(upsertCommand, "$DisplayName", incoming.DisplayName);
+			AddParameter(upsertCommand, "$OrganizerType", incoming.OrganizerType.ToString());
+			AddParameter(upsertCommand, "$MatchStrings", JsonSerializer.Serialize(incoming.MatchStrings));
+			upsertCommand.ExecuteNonQuery();
+			return;
+		}
+
+		List<string> matchStrings = (existing.Id == incoming.Id
+				? incoming.MatchStrings
+				: existing.MatchStrings.Concat(incoming.MatchStrings))
+			.Where(value => !string.IsNullOrWhiteSpace(value))
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.ToList();
+
+		using (SqliteCommand deleteCommand = connection.CreateCommand())
+		{
+			deleteCommand.Transaction = transaction;
+			deleteCommand.CommandText = "DELETE FROM SmartMatch WHERE Id = $IncomingId AND Id <> $ExistingId;";
+			AddParameter(deleteCommand, "$IncomingId", incoming.Id.ToByteArray());
+			AddParameter(deleteCommand, "$ExistingId", existing.Id.ToByteArray());
+			deleteCommand.ExecuteNonQuery();
+		}
+
+		using SqliteCommand updateCommand = connection.CreateCommand();
+		updateCommand.Transaction = transaction;
+		updateCommand.CommandText = "UPDATE SmartMatch SET ItemName = $ItemName, DisplayName = $DisplayName, OrganizerType = $OrganizerType, MatchStrings = $MatchStrings WHERE Id = $Id;";
+		AddParameter(updateCommand, "$ItemName", incoming.ItemName);
+		AddParameter(updateCommand, "$DisplayName", string.IsNullOrWhiteSpace(incoming.DisplayName) ? existing.DisplayName : incoming.DisplayName);
+		AddParameter(updateCommand, "$OrganizerType", incoming.OrganizerType.ToString());
+		AddParameter(updateCommand, "$MatchStrings", JsonSerializer.Serialize(matchStrings));
+		AddParameter(updateCommand, "$Id", existing.Id.ToByteArray());
+		updateCommand.ExecuteNonQuery();
+		incoming.Id = existing.Id;
+	}
+
+	public Task DeleteSmartMatch(string id, string matchString, CancellationToken cancellationToken)
+	{
+		return DeleteSmartMatchEntries(
+			new[]
+			{
+				new NameValuePair
+				{
+					Name = id,
+					Value = matchString
+				}
+			},
+			cancellationToken);
+	}
+
+	public Task DeleteSmartMatchEntries(IReadOnlyList<NameValuePair> entries, CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(entries);
+		var validatedEntries = entries.Select(entry =>
+		{
+			ArgumentNullException.ThrowIfNull(entry);
+			ArgumentException.ThrowIfNullOrWhiteSpace(entry.Value, "entry.Value");
+			return (Id: ParseGuid(entry.Name, "entry.Name"), MatchString: entry.Value);
+		}).ToArray();
+		return ExecuteWriteAsync(async delegate(SqliteConnection connection, SqliteTransaction transaction, CancellationToken token)
+		{
+			foreach (var entry in validatedEntries)
+			{
+				SmartMatchResult? smartMatchResult;
+				using (SqliteCommand selectCommand = connection.CreateCommand())
+				{
+					selectCommand.Transaction = transaction;
+					selectCommand.CommandText = "SELECT Id, ItemName, DisplayName, OrganizerType, MatchStrings FROM SmartMatch WHERE Id = $Id LIMIT 1;";
+					AddParameter(selectCommand, "$Id", entry.Id.ToByteArray());
+					using SqliteDataReader reader = await selectCommand.ExecuteReaderAsync(token).ConfigureAwait(continueOnCapturedContext: false);
+					smartMatchResult = ((await reader.ReadAsync(token).ConfigureAwait(continueOnCapturedContext: false) && TryReadSmartMatch(reader, out SmartMatchResult? result)) ? result : null);
+				}
+				if (smartMatchResult == null)
+				{
+					continue;
+				}
+				smartMatchResult.MatchStrings.RemoveAll((string value) => string.Equals(value, entry.MatchString, StringComparison.OrdinalIgnoreCase));
+				using SqliteCommand updateCommand = connection.CreateCommand();
+				updateCommand.Transaction = transaction;
+				if (smartMatchResult.MatchStrings.Count == 0)
+				{
+					updateCommand.CommandText = "DELETE FROM SmartMatch WHERE Id = $Id;";
+					AddParameter(updateCommand, "$Id", entry.Id.ToByteArray());
+				}
+				else
+				{
+					updateCommand.CommandText = "UPDATE SmartMatch SET MatchStrings = $MatchStrings WHERE Id = $Id;";
+					AddParameter(updateCommand, "$MatchStrings", JsonSerializer.Serialize(smartMatchResult.MatchStrings));
+					AddParameter(updateCommand, "$Id", entry.Id.ToByteArray());
+				}
+				await updateCommand.ExecuteNonQueryAsync(token).ConfigureAwait(continueOnCapturedContext: false);
+			}
 		}, cancellationToken);
 	}
 
 	public void DeleteSmartMatch(string id)
 	{
 		Guid resultId = ParseGuid(id, "id");
-		ExecuteWrite(delegate(SqliteConnection connection, SqliteTransaction transaction)
+		ExecuteWrite((connection, transaction) =>
 		{
-			using SqliteCommand sqliteCommand = connection.CreateCommand();
-			sqliteCommand.Transaction = transaction;
-			sqliteCommand.CommandText = "DELETE FROM SmartMatch WHERE Id = $Id;";
-			AddParameter(sqliteCommand, "$Id", resultId.ToByteArray());
-			sqliteCommand.ExecuteNonQuery();
+			using SqliteCommand command = connection.CreateCommand();
+			command.Transaction = transaction;
+			command.CommandText = "DELETE FROM SmartMatch WHERE Id = $Id;";
+			AddParameter(command, "$Id", resultId.ToByteArray());
+			command.ExecuteNonQuery();
 		}, CancellationToken.None);
-	}
-
-	public async Task DeleteSmartMatch(string id, string matchString, CancellationToken cancellationToken)
-	{
-		ArgumentException.ThrowIfNullOrWhiteSpace(matchString, "matchString");
-		Guid resultId = ParseGuid(id, "id");
-		await ExecuteWriteAsync(async delegate(SqliteConnection connection, SqliteTransaction transaction, CancellationToken token)
-		{
-			SmartMatchResult? smartMatchResult;
-			using (SqliteCommand selectCommand = connection.CreateCommand())
-			{
-				selectCommand.Transaction = transaction;
-				selectCommand.CommandText = "SELECT Id, ItemName, DisplayName, OrganizerType, MatchStrings FROM SmartMatch WHERE Id = $Id LIMIT 1;";
-				AddParameter(selectCommand, "$Id", resultId.ToByteArray());
-				using SqliteDataReader reader = await selectCommand.ExecuteReaderAsync(token).ConfigureAwait(continueOnCapturedContext: false);
-				smartMatchResult = ((await reader.ReadAsync(token).ConfigureAwait(continueOnCapturedContext: false) && TryReadSmartMatch(reader, out SmartMatchResult? result)) ? result : null);
-			}
-			if (smartMatchResult == null)
-			{
-				return;
-			}
-			smartMatchResult.MatchStrings.RemoveAll((string value) => string.Equals(value, matchString, StringComparison.OrdinalIgnoreCase));
-			using SqliteCommand updateCommand = connection.CreateCommand();
-			updateCommand.Transaction = transaction;
-			if (smartMatchResult.MatchStrings.Count == 0)
-			{
-				updateCommand.CommandText = "DELETE FROM SmartMatch WHERE Id = $Id;";
-				AddParameter(updateCommand, "$Id", resultId.ToByteArray());
-			}
-			else
-			{
-				updateCommand.CommandText = "UPDATE SmartMatch SET MatchStrings = $MatchStrings WHERE Id = $Id;";
-				AddParameter(updateCommand, "$MatchStrings", JsonSerializer.Serialize(smartMatchResult.MatchStrings));
-				AddParameter(updateCommand, "$Id", resultId.ToByteArray());
-			}
-			await updateCommand.ExecuteNonQueryAsync(token).ConfigureAwait(continueOnCapturedContext: false);
-		}, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
 	}
 
 	public void DeleteAllSmartMatch()
 	{
-		ExecuteWrite(delegate(SqliteConnection connection, SqliteTransaction transaction)
+		ExecuteWrite((connection, transaction) =>
 		{
-			using SqliteCommand sqliteCommand = connection.CreateCommand();
-			sqliteCommand.Transaction = transaction;
-			sqliteCommand.CommandText = "DELETE FROM SmartMatch;";
-			sqliteCommand.ExecuteNonQuery();
+			using SqliteCommand command = connection.CreateCommand();
+			command.Transaction = transaction;
+			command.CommandText = "DELETE FROM SmartMatch;";
+			command.ExecuteNonQuery();
 		}, CancellationToken.None);
 	}
 
@@ -311,8 +397,19 @@ public sealed class SqliteFileOrganizationRepository : IFileOrganizationReposito
 	{
 		using SqliteConnection sqliteConnection = OpenConnection();
 		using SqliteCommand sqliteCommand = sqliteConnection.CreateCommand();
-		sqliteCommand.CommandText = "PRAGMA journal_mode = WAL;\nPRAGMA synchronous = NORMAL;\nPRAGMA foreign_keys = ON;\nPRAGMA busy_timeout = 5000;\n\nCREATE TABLE IF NOT EXISTS FileOrganizerResults (\n    ResultId BLOB PRIMARY KEY,\n    OriginalPath TEXT,\n    TargetPath TEXT,\n    FileLength INTEGER NOT NULL DEFAULT 0,\n    OrganizationDate TEXT NOT NULL,\n    Status TEXT NOT NULL,\n    OrganizationType TEXT NOT NULL,\n    StatusMessage TEXT,\n    ExtractedName TEXT,\n    ExtractedYear INTEGER NULL,\n    ExtractedSeasonNumber INTEGER NULL,\n    ExtractedEpisodeNumber INTEGER NULL,\n    ExtractedEndingEpisodeNumber INTEGER NULL,\n    DuplicatePaths TEXT NULL\n);\nCREATE INDEX IF NOT EXISTS idx_FileOrganizerResults_Date\n    ON FileOrganizerResults(OrganizationDate DESC);\n\nCREATE TABLE IF NOT EXISTS SmartMatch (\n    Id BLOB PRIMARY KEY,\n    ItemName TEXT NOT NULL,\n    DisplayName TEXT,\n    OrganizerType TEXT NOT NULL,\n    MatchStrings TEXT NULL\n);\nCREATE INDEX IF NOT EXISTS idx_SmartMatch_ItemName\n    ON SmartMatch(ItemName COLLATE NOCASE);\n\nPRAGMA user_version = 1;";
+		sqliteCommand.CommandText = "PRAGMA journal_mode = WAL;\nPRAGMA synchronous = NORMAL;\nPRAGMA foreign_keys = ON;\nPRAGMA busy_timeout = 5000;\n\nCREATE TABLE IF NOT EXISTS FileOrganizerResults (\n    ResultId BLOB PRIMARY KEY,\n    OriginalPath TEXT,\n    TargetPath TEXT,\n    FileLength INTEGER NOT NULL DEFAULT 0,\n    OrganizationDate TEXT NOT NULL,\n    Status TEXT NOT NULL,\n    OrganizationType TEXT NOT NULL,\n    StatusMessage TEXT,\n    ExtractedName TEXT,\n    ExtractedYear INTEGER NULL,\n    ExtractedSeasonNumber INTEGER NULL,\n    ExtractedEpisodeNumber INTEGER NULL,\n    ExtractedEndingEpisodeNumber INTEGER NULL,\n    DuplicatePaths TEXT NULL\n);\nCREATE INDEX IF NOT EXISTS idx_FileOrganizerResults_Date\n    ON FileOrganizerResults(OrganizationDate DESC);\n\nCREATE TABLE IF NOT EXISTS SmartMatch (\n    Id BLOB PRIMARY KEY,\n    ItemName TEXT NOT NULL,\n    DisplayName TEXT,\n    OrganizerType TEXT NOT NULL,\n    MatchStrings TEXT NULL\n);\nCREATE INDEX IF NOT EXISTS idx_SmartMatch_ItemName\n    ON SmartMatch(ItemName COLLATE NOCASE);";
 		sqliteCommand.ExecuteNonQuery();
+		using (SqliteCommand versionCommand = sqliteConnection.CreateCommand())
+		{
+			versionCommand.CommandText = "PRAGMA user_version;";
+			if (Convert.ToInt32(versionCommand.ExecuteScalar(), CultureInfo.InvariantCulture) < 2)
+			{
+				RemoveMalformedRows(sqliteConnection);
+				MergeDuplicateSmartMatches(sqliteConnection);
+				versionCommand.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS idx_SmartMatch_UniqueItem ON SmartMatch(OrganizerType COLLATE NOCASE, ItemName COLLATE NOCASE); PRAGMA user_version = 2;";
+				versionCommand.ExecuteNonQuery();
+			}
+		}
 		using SqliteCommand sqliteCommand2 = sqliteConnection.CreateCommand();
 		sqliteCommand2.CommandText = "PRAGMA quick_check;";
 		string? text = Convert.ToString(sqliteCommand2.ExecuteScalar(), CultureInfo.InvariantCulture);
@@ -320,6 +417,113 @@ public sealed class SqliteFileOrganizationRepository : IFileOrganizationReposito
 		{
 			throw new SqliteException("SQLite quick_check failed: " + text, 11);
 		}
+	}
+
+	private void RemoveMalformedRows(SqliteConnection connection)
+	{
+		var malformedFileRows = new List<long>();
+		using (SqliteCommand command = connection.CreateCommand())
+		{
+			command.CommandText = "SELECT ResultId, OriginalPath, TargetPath, FileLength, OrganizationDate, Status, OrganizationType, StatusMessage, ExtractedName, ExtractedYear, ExtractedSeasonNumber, ExtractedEpisodeNumber, ExtractedEndingEpisodeNumber, DuplicatePaths, rowid FROM FileOrganizerResults;";
+			using SqliteDataReader reader = command.ExecuteReader();
+			while (reader.Read())
+			{
+				if (!TryReadFileResult(reader, out _))
+				{
+					malformedFileRows.Add(reader.GetInt64(14));
+				}
+			}
+		}
+		var malformedSmartMatchRows = new List<long>();
+		using (SqliteCommand command = connection.CreateCommand())
+		{
+			command.CommandText = "SELECT Id, ItemName, DisplayName, OrganizerType, MatchStrings, rowid FROM SmartMatch;";
+			using SqliteDataReader reader = command.ExecuteReader();
+			while (reader.Read())
+			{
+				if (!TryReadSmartMatch(reader, out _))
+				{
+					malformedSmartMatchRows.Add(reader.GetInt64(5));
+				}
+			}
+		}
+		if (malformedFileRows.Count == 0 && malformedSmartMatchRows.Count == 0)
+		{
+			return;
+		}
+		using SqliteTransaction transaction = connection.BeginTransaction();
+		DeleteRows(connection, transaction, "FileOrganizerResults", malformedFileRows);
+		DeleteRows(connection, transaction, "SmartMatch", malformedSmartMatchRows);
+		transaction.Commit();
+		_logger.LogWarning("Removed {FileResultCount} malformed Auto Organize results and {SmartMatchCount} malformed smart matches", malformedFileRows.Count, malformedSmartMatchRows.Count);
+	}
+
+	private static void DeleteRows(SqliteConnection connection, SqliteTransaction transaction, string table, IEnumerable<long> rowIds)
+	{
+		using SqliteCommand command = connection.CreateCommand();
+		command.Transaction = transaction;
+		command.CommandText = $"DELETE FROM {table} WHERE rowid = $RowId;";
+		SqliteParameter parameter = command.Parameters.Add("$RowId", SqliteType.Integer);
+		foreach (long rowId in rowIds)
+		{
+			parameter.Value = rowId;
+			command.ExecuteNonQuery();
+		}
+	}
+
+	private void MergeDuplicateSmartMatches(SqliteConnection connection)
+	{
+		var matches = new List<SmartMatchResult>();
+		using (SqliteCommand command = connection.CreateCommand())
+		{
+			command.CommandText = "SELECT Id, ItemName, DisplayName, OrganizerType, MatchStrings FROM SmartMatch ORDER BY Id;";
+			using SqliteDataReader reader = command.ExecuteReader();
+			while (reader.Read())
+			{
+				if (TryReadSmartMatch(reader, out SmartMatchResult? result))
+				{
+					matches.Add(result);
+				}
+			}
+		}
+		var duplicateGroups = matches
+			.GroupBy(match => $"{match.OrganizerType}\0{match.ItemName}", StringComparer.OrdinalIgnoreCase)
+			.Where(group => group.Count() > 1)
+			.ToList();
+		if (duplicateGroups.Count == 0)
+		{
+			return;
+		}
+		using SqliteTransaction transaction = connection.BeginTransaction();
+		foreach (var group in duplicateGroups)
+		{
+			SmartMatchResult primary = group.First();
+			foreach (string matchString in group.SelectMany(match => match.MatchStrings).Distinct(StringComparer.OrdinalIgnoreCase))
+			{
+				if (!primary.MatchStrings.Contains(matchString, StringComparer.OrdinalIgnoreCase))
+				{
+					primary.MatchStrings.Add(matchString);
+				}
+			}
+			using (SqliteCommand updateCommand = connection.CreateCommand())
+			{
+				updateCommand.Transaction = transaction;
+				updateCommand.CommandText = "UPDATE SmartMatch SET MatchStrings = $MatchStrings WHERE Id = $Id;";
+				AddParameter(updateCommand, "$MatchStrings", JsonSerializer.Serialize(primary.MatchStrings));
+				AddParameter(updateCommand, "$Id", primary.Id.ToByteArray());
+				updateCommand.ExecuteNonQuery();
+			}
+			foreach (SmartMatchResult duplicate in group.Skip(1))
+			{
+				using SqliteCommand deleteCommand = connection.CreateCommand();
+				deleteCommand.Transaction = transaction;
+				deleteCommand.CommandText = "DELETE FROM SmartMatch WHERE Id = $Id;";
+				AddParameter(deleteCommand, "$Id", duplicate.Id.ToByteArray());
+				deleteCommand.ExecuteNonQuery();
+			}
+		}
+		transaction.Commit();
+		_logger.LogInformation("Merged {DuplicateGroupCount} duplicate Auto Organize smart-match groups", duplicateGroups.Count);
 	}
 
 	private SqliteConnection OpenConnection()

@@ -44,6 +44,10 @@ function normalizeExtensions(value) {
         .filter(Boolean);
 }
 
+function parseWatchLocations(value) {
+    return String(value ?? '').split(/\r?\n/).map(path => path.trim()).filter(Boolean);
+}
+
 function setSelectOptions(select, options, includeBlank) {
     select.replaceChildren();
 
@@ -69,7 +73,7 @@ function loadPage(view, config) {
     view.querySelector('#txtMovieMinFileSize').value = movieOptions.MinFileSizeMb ?? 0;
     view.querySelector('#txtMoviePattern').value = movieOptions.MoviePattern || '';
     view.querySelector('#chkPreserveMovieFilename').checked = Boolean(movieOptions.PreserveOriginalFilename) || movieOptions.MoviePattern === '%fn.%ext';
-    view.querySelector('#txtWatchMovieFolder').value = watchLocations[0] || '';
+    view.querySelector('#txtWatchMovieFolder').value = watchLocations.join('\n');
     view.querySelector('#chkSubMovieFolders').checked = Boolean(movieOptions.MovieFolder);
     view.querySelector('#txtMovieFolderPattern').value = movieOptions.MovieFolderPattern || '';
     view.querySelector('#txtDeleteLeftOverMovieFiles').value = leftOverExtensions.join(';');
@@ -77,6 +81,7 @@ function loadPage(view, config) {
     view.querySelector('#chkEnableMovieAutoDetect').checked = Boolean(movieOptions.AutoDetectMovie);
     view.querySelector('#copyOrMoveMovieFile').value = String(Boolean(movieOptions.CopyOriginalFile));
     view.querySelector('#chkQueueLibScan').checked = Boolean(movieOptions.QueueLibraryScan);
+    view.querySelector('#chkRequireMovieApproval').checked = Boolean(movieOptions.RequireApproval);
 }
 
 async function onSubmit(view) {
@@ -110,10 +115,10 @@ async function onSubmit(view) {
         movieOptions.MovieFolder = view.querySelector('#chkSubMovieFolders').checked;
         movieOptions.MovieFolderPattern = view.querySelector('#txtMovieFolderPattern').value;
 
-        const watchLocation = view.querySelector('#txtWatchMovieFolder').value.trim();
-        movieOptions.WatchLocations = watchLocation ? [watchLocation] : [];
+        movieOptions.WatchLocations = parseWatchLocations(view.querySelector('#txtWatchMovieFolder').value);
         movieOptions.CopyOriginalFile = view.querySelector('#copyOrMoveMovieFile').value === 'true';
         movieOptions.QueueLibraryScan = view.querySelector('#chkQueueLibScan').checked;
+        movieOptions.RequireApproval = view.querySelector('#chkRequireMovieApproval').checked;
 
         const result = await ApiClient.updateNamedConfiguration('autoorganize', config);
         Dashboard.processServerConfigurationUpdateResult(result);
@@ -188,7 +193,8 @@ export default function (view) {
         picker.show({
             callback: function (path) {
                 if (path) {
-                    view.querySelector('#txtWatchMovieFolder').value = path;
+                    const field = view.querySelector('#txtWatchMovieFolder');
+                    field.value = [...new Set([...parseWatchLocations(field.value), path])].join('\n');
                 }
 
                 picker.close();

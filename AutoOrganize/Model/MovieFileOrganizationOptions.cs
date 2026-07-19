@@ -34,6 +34,8 @@ public class MovieFileOrganizationOptions
 
     public bool QueueLibraryScan { get; set; }
 
+    public bool RequireApproval { get; set; }
+
     public MovieFileOrganizationOptions()
     {
         MinFileSizeMb = 50;
@@ -42,6 +44,7 @@ public class MovieFileOrganizationOptions
         PreserveOriginalFilename = false;
         WatchLocations = new List<string>();
         CopyOriginalFile = false;
+        AutoDetectMovie = true;
         MovieFolder = false;
         MovieFolderPattern = "%mn (%my)";
         QueueLibraryScan = false;

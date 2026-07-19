@@ -1,6 +1,8 @@
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using AutoOrganize.Model;
+using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Querying;
 
 namespace AutoOrganize.Data;
@@ -21,9 +23,13 @@ public interface IFileOrganizationRepository
 
 	void SaveResult(SmartMatchResult result, CancellationToken cancellationToken);
 
-	void DeleteSmartMatch(string id);
+	Task AddSmartMatchString(string itemName, string displayName, FileOrganizerType organizerType, string matchString, CancellationToken cancellationToken);
 
 	Task DeleteSmartMatch(string id, string matchString, CancellationToken cancellationToken);
+
+	Task DeleteSmartMatchEntries(IReadOnlyList<NameValuePair> entries, CancellationToken cancellationToken);
+
+	void DeleteSmartMatch(string id);
 
 	void DeleteAllSmartMatch();
 

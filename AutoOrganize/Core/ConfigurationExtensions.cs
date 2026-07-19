@@ -68,78 +68,20 @@ public static class ConfigurationExtensions
 
 	private static AutoOrganizeOptions Normalize(AutoOrganizeOptions options)
 	{
-		AutoOrganizeOptions autoOrganizeOptions = options;
-		TvFileOrganizationOptions tvFileOrganizationOptions;
-		if (autoOrganizeOptions.TvOptions == null)
-		{
-			tvFileOrganizationOptions = (autoOrganizeOptions.TvOptions = new TvFileOrganizationOptions());
-		}
-		autoOrganizeOptions = options;
-		MovieFileOrganizationOptions movieFileOrganizationOptions;
-		if (autoOrganizeOptions.MovieOptions == null)
-		{
-			movieFileOrganizationOptions = (autoOrganizeOptions.MovieOptions = new MovieFileOrganizationOptions());
-		}
-		autoOrganizeOptions = options;
-		if (autoOrganizeOptions.SmartMatchInfos == null)
-		{
-			List<SmartMatchInfo> list = (autoOrganizeOptions.SmartMatchInfos = new List<SmartMatchInfo>());
-		}
-		tvFileOrganizationOptions = options.TvOptions;
-		if (tvFileOrganizationOptions.WatchLocations == null)
-		{
-			List<string> list3 = (tvFileOrganizationOptions.WatchLocations = new List<string>());
-		}
-		tvFileOrganizationOptions = options.TvOptions;
-		if (tvFileOrganizationOptions.LeftOverFileExtensionsToDelete == null)
-		{
-			List<string> list3 = (tvFileOrganizationOptions.LeftOverFileExtensionsToDelete = new List<string>());
-		}
-		tvFileOrganizationOptions = options.TvOptions;
-		if (tvFileOrganizationOptions.EpisodeNamePattern == null)
-		{
-			string text = (tvFileOrganizationOptions.EpisodeNamePattern = "%sn - %sx%0e - %en.%ext");
-		}
-		tvFileOrganizationOptions = options.TvOptions;
-		if (tvFileOrganizationOptions.MultiEpisodeNamePattern == null)
-		{
-			string text = (tvFileOrganizationOptions.MultiEpisodeNamePattern = "%sn - %sx%0e-x%0ed - %en.%ext");
-		}
-		tvFileOrganizationOptions = options.TvOptions;
-		if (tvFileOrganizationOptions.SeasonFolderPattern == null)
-		{
-			string text = (tvFileOrganizationOptions.SeasonFolderPattern = "Season %s");
-		}
-		tvFileOrganizationOptions = options.TvOptions;
-		if (tvFileOrganizationOptions.SeasonZeroFolderName == null)
-		{
-			string text = (tvFileOrganizationOptions.SeasonZeroFolderName = "Season 0");
-		}
-		tvFileOrganizationOptions = options.TvOptions;
-		if (tvFileOrganizationOptions.SeriesFolderPattern == null)
-		{
-			string text = (tvFileOrganizationOptions.SeriesFolderPattern = "%fn");
-		}
-		movieFileOrganizationOptions = options.MovieOptions;
-		if (movieFileOrganizationOptions.WatchLocations == null)
-		{
-			List<string> list3 = (movieFileOrganizationOptions.WatchLocations = new List<string>());
-		}
-		movieFileOrganizationOptions = options.MovieOptions;
-		if (movieFileOrganizationOptions.LeftOverFileExtensionsToDelete == null)
-		{
-			List<string> list3 = (movieFileOrganizationOptions.LeftOverFileExtensionsToDelete = new List<string>());
-		}
-		movieFileOrganizationOptions = options.MovieOptions;
-		if (movieFileOrganizationOptions.MoviePattern == null)
-		{
-			string text = (movieFileOrganizationOptions.MoviePattern = "%fn.%ext");
-		}
-		movieFileOrganizationOptions = options.MovieOptions;
-		if (movieFileOrganizationOptions.MovieFolderPattern == null)
-		{
-			string text = (movieFileOrganizationOptions.MovieFolderPattern = "%mn (%my)");
-		}
+		options.TvOptions ??= new TvFileOrganizationOptions();
+		options.MovieOptions ??= new MovieFileOrganizationOptions();
+		options.SmartMatchInfos ??= new List<SmartMatchInfo>();
+		options.TvOptions.WatchLocations ??= new List<string>();
+		options.TvOptions.LeftOverFileExtensionsToDelete ??= new List<string>();
+		options.TvOptions.EpisodeNamePattern ??= "%sn - %sx%0e - %en.%ext";
+		options.TvOptions.MultiEpisodeNamePattern ??= "%sn - %sx%0e-x%0ed - %en.%ext";
+		options.TvOptions.SeasonFolderPattern ??= "Season %s";
+		options.TvOptions.SeasonZeroFolderName ??= "Season 0";
+		options.TvOptions.SeriesFolderPattern ??= "%fn";
+		options.MovieOptions.WatchLocations ??= new List<string>();
+		options.MovieOptions.LeftOverFileExtensionsToDelete ??= new List<string>();
+		options.MovieOptions.MoviePattern ??= "%fn.%ext";
+		options.MovieOptions.MovieFolderPattern ??= "%mn (%my)";
 		return options;
 	}
 }

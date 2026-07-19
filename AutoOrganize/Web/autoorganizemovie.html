@@ -145,10 +145,10 @@
                             <div class="inputContainer aoSpanAll">
                                 <div class="aoPathField">
                                     <div>
-                                        <input is="emby-input" id="txtWatchMovieFolder" type="text" label="Watch folder" />
-                                        <div class="fieldDescription">This folder will be monitored for new movies.</div>
+                                        <textarea is="emby-textarea" id="txtWatchMovieFolder" rows="3" label="Watch folders"></textarea>
+                                        <div class="fieldDescription">One folder per line. Each folder will be monitored for new movies.</div>
                                     </div>
-                                    <button type="button" is="paper-icon-button-light" id="btnSelectWatchMovieFolder" title="Select watch folder" aria-label="Select watch folder" class="autoSize">
+                                    <button type="button" is="paper-icon-button-light" id="btnSelectWatchMovieFolder" title="Add watch folder" aria-label="Add watch folder" class="autoSize">
                                         <span class="material-icons search"></span>
                                     </button>
                                 </div>
@@ -170,6 +170,13 @@
                                     <span>Overwrite existing movies</span>
                                 </label>
                                 <div class="fieldDescription checkboxFieldDescription">Replace a destination file when the generated path already exists.</div>
+                            </div>
+                            <div class="checkboxContainer checkboxContainer-withDescription aoSpanAll">
+                                <label>
+                                    <input type="checkbox" is="emby-checkbox" id="chkRequireMovieApproval" />
+                                    <span>Require approval before organizing</span>
+                                </label>
+                                <div class="fieldDescription checkboxFieldDescription">Detect matches first and wait for approval from the activity log.</div>
                             </div>
                         </div>
                     </div>

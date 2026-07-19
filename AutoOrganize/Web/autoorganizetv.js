@@ -86,6 +86,10 @@ function normalizeExtensions(value) {
         .filter(Boolean);
 }
 
+function parseWatchLocations(value) {
+    return String(value ?? '').split(/\r?\n/).map(path => path.trim()).filter(Boolean);
+}
+
 function setSelectOptions(select, options, includeBlank) {
     select.replaceChildren();
 
@@ -112,7 +116,7 @@ function loadPage(view, config) {
     view.querySelector('#txtMinFileSize').value = tvOptions.MinFileSizeMb ?? 0;
     view.querySelector('#txtSeasonFolderPattern').value = tvOptions.SeasonFolderPattern || '';
     view.querySelector('#txtSeasonZeroName').value = tvOptions.SeasonZeroFolderName || '';
-    view.querySelector('#txtWatchFolder').value = watchLocations[0] || '';
+    view.querySelector('#txtWatchFolder').value = watchLocations.join('\n');
 
     view.querySelector('#txtEpisodePattern').value = tvOptions.EpisodeNamePattern || '';
     view.querySelector('#txtMultiEpisodePattern').value = tvOptions.MultiEpisodeNamePattern || '';
@@ -124,6 +128,7 @@ function loadPage(view, config) {
     view.querySelector('#chkExtendedClean').checked = Boolean(tvOptions.ExtendedClean);
     view.querySelector('#copyOrMoveFile').value = String(Boolean(tvOptions.CopyOriginalFile));
     view.querySelector('#chkQueueLibScan').checked = Boolean(tvOptions.QueueLibraryScan);
+    view.querySelector('#chkRequireApproval').checked = Boolean(tvOptions.RequireApproval);
 }
 
 async function onSubmit(view) {
@@ -160,10 +165,10 @@ async function onSubmit(view) {
         tvOptions.LeftOverFileExtensionsToDelete = normalizeExtensions(view.querySelector('#txtDeleteLeftOverFiles').value);
         tvOptions.ExtendedClean = view.querySelector('#chkExtendedClean').checked;
 
-        const watchLocation = view.querySelector('#txtWatchFolder').value.trim();
-        tvOptions.WatchLocations = watchLocation ? [watchLocation] : [];
+        tvOptions.WatchLocations = parseWatchLocations(view.querySelector('#txtWatchFolder').value);
         tvOptions.CopyOriginalFile = view.querySelector('#copyOrMoveFile').value === 'true';
         tvOptions.QueueLibraryScan = view.querySelector('#chkQueueLibScan').checked;
+        tvOptions.RequireApproval = view.querySelector('#chkRequireApproval').checked;
 
         const result = await ApiClient.updateNamedConfiguration('autoorganize', config);
         Dashboard.processServerConfigurationUpdateResult(result);
@@ -249,7 +254,8 @@ export default function (view) {
         picker.show({
             callback: function (path) {
                 if (path) {
-                    view.querySelector('#txtWatchFolder').value = path;
+                    const field = view.querySelector('#txtWatchFolder');
+                    field.value = [...new Set([...parseWatchLocations(field.value), path])].join('\n');
                 }
 
                 picker.close();

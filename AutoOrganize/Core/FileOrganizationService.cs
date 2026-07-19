@@ -12,6 +12,7 @@ using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
+using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.IO;
 using MediaBrowser.Model.Querying;
 using MediaBrowser.Model.Tasks;
@@ -57,11 +58,6 @@ public class FileOrganizationService : IFileOrganizationService
 		_namingOptions = new NamingOptions();
 	}
 
-	public void BeginProcessNewFiles()
-	{
-		_taskManager.CancelIfRunningAndQueue<OrganizerScheduledTask>();
-	}
-
 	public void SaveResult(FileOrganizationResult result, CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(result, "result");
@@ -74,6 +70,16 @@ public class FileOrganizationService : IFileOrganizationService
 	{
 		ArgumentNullException.ThrowIfNull(result, "result");
 		_repo.SaveResult(result, cancellationToken);
+	}
+
+	public void BeginProcessNewFiles()
+	{
+		_taskManager.CancelIfRunningAndQueue<OrganizerScheduledTask>();
+	}
+
+	public Task AddSmartMatchString(string itemName, string displayName, FileOrganizerType organizerType, string matchString, CancellationToken cancellationToken)
+	{
+		return _repo.AddSmartMatchString(itemName, displayName, organizerType, matchString, cancellationToken);
 	}
 
 	public QueryResult<FileOrganizationResult> GetResults(FileOrganizationResultQuery query)
@@ -131,6 +137,16 @@ public class FileOrganizationService : IFileOrganizationService
 		{
 			RemoveFromInprogressList(result);
 		}
+	}
+
+	public async Task DeleteResult(string resultId, CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		if (_repo.GetResult(resultId) == null)
+		{
+			throw new OrganizationException("Organization result '" + resultId + "' was not found.");
+		}
+		await _repo.Delete(resultId, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
 	}
 
 	public async Task PerformOrganization(string resultId, CancellationToken cancellationToken)
@@ -197,12 +213,15 @@ public class FileOrganizationService : IFileOrganizationService
 		return _repo.GetSmartMatch(new FileOrganizationResultQuery());
 	}
 
-	public async Task DeleteSmartMatchEntry(string id, string matchString, CancellationToken cancellationToken)
+	public Task DeleteSmartMatchEntries(IReadOnlyList<NameValuePair> entries, CancellationToken cancellationToken)
 	{
-		ArgumentException.ThrowIfNullOrWhiteSpace(id, "id");
-		ArgumentException.ThrowIfNullOrWhiteSpace(matchString, "matchString");
-		cancellationToken.ThrowIfCancellationRequested();
-		await _repo.DeleteSmartMatch(id, matchString, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+		ArgumentNullException.ThrowIfNull(entries);
+		return _repo.DeleteSmartMatchEntries(entries, cancellationToken);
+	}
+
+	public Task DeleteSmartMatchEntry(string id, string matchString, CancellationToken cancellationToken)
+	{
+		return _repo.DeleteSmartMatch(id, matchString, cancellationToken);
 	}
 
 	public bool AddToInProgressList(FileOrganizationResult result, bool fullClientRefresh)

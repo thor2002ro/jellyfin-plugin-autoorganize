@@ -47,11 +47,10 @@ async function getAllSmartMatchInfos() {
             ? result.TotalRecordCount
             : items.length;
 
-        if (pageItems.length === 0 || items.length >= totalRecordCount || pageItems.length < pageSize) {
+        startIndex += pageSize;
+        if (startIndex >= totalRecordCount) {
             break;
         }
-
-        startIndex += pageItems.length;
     }
 
     return {

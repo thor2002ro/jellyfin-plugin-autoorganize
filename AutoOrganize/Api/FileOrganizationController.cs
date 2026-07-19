@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using AutoOrganize.Core;
@@ -51,6 +52,19 @@ public class FileOrganizationController : ControllerBase
 		{
 			return OrganizationProblem(exception);
 		}
+	}
+
+	[HttpDelete("{id}")]
+	[ProducesResponseType(204)]
+	[ProducesResponseType(404)]
+	public async Task<ActionResult> Reject([FromRoute] string id, CancellationToken cancellationToken)
+	{
+		if (_fileOrganizationService.GetResult(id) == null)
+		{
+			return NotFound();
+		}
+		await _fileOrganizationService.DeleteResult(id, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+		return NoContent();
 	}
 
 	[HttpDelete]
@@ -162,6 +176,7 @@ public class FileOrganizationController : ControllerBase
 
 	[HttpPost("SmartMatches/Delete")]
 	[ProducesResponseType(204)]
+	[ProducesResponseType(400)]
 	public async Task<ActionResult> DeleteSmartWatchEntry([FromBody] SmartMatchDeleteRequest request, CancellationToken cancellationToken)
 	{
 		if (request?.Entries == null || request.Entries.Count == 0)
@@ -170,13 +185,12 @@ public class FileOrganizationController : ControllerBase
 		}
 		foreach (NameValuePair entry in request.Entries)
 		{
-			if (entry == null || string.IsNullOrWhiteSpace(entry.Name) || string.IsNullOrWhiteSpace(entry.Value))
+			if (entry == null || !Guid.TryParse(entry.Name, out _) || string.IsNullOrWhiteSpace(entry.Value))
 			{
-				return BadRequest("Each smart-match entry must include an id and value.");
+				return BadRequest("Each smart-match entry must include a valid id and value.");
 			}
-			cancellationToken.ThrowIfCancellationRequested();
-			await _fileOrganizationService.DeleteSmartMatchEntry(entry.Name, entry.Value, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
 		}
+		await _fileOrganizationService.DeleteSmartMatchEntries(request.Entries, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
 		return NoContent();
 	}
 

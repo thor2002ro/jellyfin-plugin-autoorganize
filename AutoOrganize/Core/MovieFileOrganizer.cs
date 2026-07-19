@@ -52,7 +52,12 @@ public class MovieFileOrganizer
 		_namingOptions = namingOptions;
 	}
 
-	public async Task<FileOrganizationResult> OrganizeMovieFile(string path, MovieFileOrganizationOptions options, bool overwriteExisting, CancellationToken cancellationToken)
+	public Task<FileOrganizationResult> OrganizeMovieFile(string path, MovieFileOrganizationOptions options, bool overwriteExisting, CancellationToken cancellationToken)
+	{
+		return OrganizeMovieFile(path, options, overwriteExisting, requireApproval: false, cancellationToken);
+	}
+
+	public async Task<FileOrganizationResult> OrganizeMovieFile(string path, MovieFileOrganizationOptions options, bool overwriteExisting, bool requireApproval, CancellationToken cancellationToken)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(path, "path");
 		ArgumentNullException.ThrowIfNull(options, "options");
@@ -72,7 +77,7 @@ public class MovieFileOrganizer
 			{
 				result.Status = FileSortingStatus.Failure;
 				result.StatusMessage = "Path is locked by other processes. Please try again later.";
-				_logger.LogInformation("Auto-organize Path is locked by other processes. Please try again later.");
+				_logger.LogInformation("Auto-organize source {Path} is locked by another process; it will be retried later", path);
 				_organizationService.SaveResult(result, cancellationToken);
 				return result;
 			}
@@ -81,7 +86,7 @@ public class MovieFileOrganizer
 			{
 				int? year = videoFileInfo.Year;
 				_logger.LogDebug("Extracted information from {Path}. Movie {MovieName}, Year {MovieYear}", path, videoFileInfo.Name, year);
-				await OrganizeMovie(path, videoFileInfo.Name, year, options, overwriteExisting, result, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+				await OrganizeMovie(path, videoFileInfo.Name, year, options, overwriteExisting, requireApproval, result, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
 			}
 			else
 			{
@@ -174,6 +179,7 @@ public class MovieFileOrganizer
 				movie,
 				options,
 				overwriteExisting: true,
+				requireApproval: false,
 				result,
 				cancellationToken).ConfigureAwait(false);
 			_organizationService.SaveResult(result, cancellationToken);
@@ -193,7 +199,7 @@ public class MovieFileOrganizer
 		return result;
 	}
 
-	private async Task OrganizeMovie(string sourcePath, string movieName, int? movieYear, MovieFileOrganizationOptions options, bool overwriteExisting, FileOrganizationResult result, CancellationToken cancellationToken)
+	private async Task OrganizeMovie(string sourcePath, string movieName, int? movieYear, MovieFileOrganizationOptions options, bool overwriteExisting, bool requireApproval, FileOrganizationResult result, CancellationToken cancellationToken)
 	{
 		Movie? movie = GetMatchingMovie(movieName, movieYear, string.Empty, result);
 		if (movie == null)
@@ -209,12 +215,14 @@ public class MovieFileOrganizer
 			}
 		}
 		result.Type = CurrentFileOrganizerType;
-		await OrganizeMovie(sourcePath, movie, options, overwriteExisting, result, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+		await OrganizeMovie(sourcePath, movie, options, overwriteExisting, requireApproval, result, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
 	}
 
-	private async Task OrganizeMovie(string sourcePath, Movie movie, MovieFileOrganizationOptions options, bool overwriteExisting, FileOrganizationResult result, CancellationToken cancellationToken)
+	private async Task OrganizeMovie(string sourcePath, Movie movie, MovieFileOrganizationOptions options, bool overwriteExisting, bool requireApproval, FileOrganizationResult result, CancellationToken cancellationToken)
 	{
 		_logger.LogInformation("Sorting file {SourcePath} into movie {MoviePath}", sourcePath, movie.Path);
+		result.ExtractedName = movie.Name;
+		result.ExtractedYear = movie.ProductionYear;
 		bool flag = string.IsNullOrWhiteSpace(result.Id);
 		if (flag)
 		{
@@ -255,6 +263,12 @@ public class MovieFileOrganizer
 					return;
 				}
 			}
+			if (requireApproval)
+			{
+				result.Status = FileSortingStatus.Detected;
+				result.StatusMessage = "Detected and waiting for approval.";
+				return;
+			}
 			await PerformFileSortingAsync(options, overwriteExisting, result, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
 		}
 		catch (OperationCanceledException)
@@ -270,7 +284,7 @@ public class MovieFileOrganizer
 		{
 			result.Status = FileSortingStatus.Failure;
 			result.StatusMessage = ex3.Message;
-			_logger.LogError(ex3, "Caught a generic exception while organizing {SourcePath}", sourcePath);
+			_logger.LogError(ex3, "Error organizing movie {SourcePath}", sourcePath);
 		}
 		finally
 		{

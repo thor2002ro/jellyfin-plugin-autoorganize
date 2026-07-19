@@ -62,6 +62,18 @@ internal static class PathSafety
 		return true;
 	}
 
+	public static bool HasHiddenSegmentUnderRoot(string rootPath, string candidatePath)
+	{
+		if (!TryNormalize(rootPath, out string root) || !TryNormalize(candidatePath, out string candidate) || !IsSameOrSubPathNormalized(root, candidate))
+		{
+			return false;
+		}
+		string relativePath = Path.GetRelativePath(root, candidate);
+		return relativePath != "."
+			&& relativePath.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries)
+				.Any(segment => segment.StartsWith(".", StringComparison.Ordinal) && segment.Length > 1);
+	}
+
 	public static string GetAuthorizedLibraryRoot(string? requestedRoot, IEnumerable<string> configuredRoots)
 	{
 		ArgumentNullException.ThrowIfNull(configuredRoots, "configuredRoots");

@@ -5,5 +5,6 @@ public enum FileOrganizerType
 	Unknown,
 	Movie,
 	Episode,
-	Song
+	Song,
+	Log
 }

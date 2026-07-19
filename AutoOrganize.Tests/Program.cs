@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using AutoOrganize.Core;
 using AutoOrganize.Data;
 using AutoOrganize.Model;
+using MediaBrowser.Model.Dto;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -296,12 +297,14 @@ internal static class Program
             var options = new TvFileOrganizationOptions();
             False(options.PreserveOriginalFilename);
             False(options.AlwaysCreateSeasonFolders);
+            True(options.AutoDetectSeries);
         });
         Add("new movie options retain the legacy preservation pattern", () =>
         {
             var options = new MovieFileOrganizationOptions();
             False(options.PreserveOriginalFilename);
             Equal("%fn.%ext", options.MoviePattern);
+            True(options.AutoDetectMovie);
         });
 
         Add("episode identity includes season number", () =>
@@ -343,6 +346,37 @@ internal static class Program
             string nested = Path.Combine(library, "incoming");
             True(PathSafety.PathsOverlap(library, nested));
             True(PathSafety.PathsOverlap(nested, library));
+        });
+        Add("hidden watch folder under library is treated as ignored", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string library = Path.Combine(temporary.Path, "library");
+            string incoming = Path.Combine(library, ".NEW", "#in");
+            True(PathSafety.HasHiddenSegmentUnderRoot(library, incoming));
+        });
+        Add("ordinary watch folder under library is not treated as ignored", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string library = Path.Combine(temporary.Path, "library");
+            string incoming = Path.Combine(library, "NEW", "#in");
+            False(PathSafety.HasHiddenSegmentUnderRoot(library, incoming));
+        });
+        Add("TV and movie organizers reject overlapping watch locations", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string root = Path.Combine(temporary.Path, "watch");
+            var overlap = OrganizerScheduledTask.FindWatchLocationOverlap(
+                new[] { root },
+                new[] { Path.Combine(root, "movies") });
+            True(overlap.HasValue);
+            Equal(root, overlap.GetValueOrDefault().Tv);
+        });
+        Add("TV and movie organizers allow separate watch locations", () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            Equal<(string Tv, string Movie)?>(null, OrganizerScheduledTask.FindWatchLocationOverlap(
+                new[] { Path.Combine(temporary.Path, "tv") },
+                new[] { Path.Combine(temporary.Path, "movies") }));
         });
         Add("authorized library root must match an exact configured root", () =>
         {
@@ -475,8 +509,13 @@ internal static class Program
         AddAsync("SQLite repository deletes completed results only", RepositoryDeletesCompletedResults);
         Add("SQLite repository honors canceled writes", RepositoryHonorsCanceledWrites);
         Add("SQLite smart matches round-trip and upsert", SmartMatchesRoundTripAndUpsert);
+        Add("SQLite smart-match saves merge logical duplicates", SmartMatchSavesMergeLogicalDuplicates);
         AddAsync("SQLite smart-match deletion is case-insensitive", SmartMatchDeletionIsCaseInsensitive);
         AddAsync("SQLite smart-match deletion removes empty rows", SmartMatchDeletionRemovesEmptyRows);
+        AddAsync("SQLite smart-match batches validate before mutation", SmartMatchBatchValidationIsAtomic);
+        AddAsync("SQLite smart-match additions merge concurrent corrections", SmartMatchAdditionsMergeConcurrently);
+        Add("SQLite initialization merges duplicate smart matches", SmartMatchInitializationMergesDuplicates);
+        Add("SQLite initialization removes malformed rows", RepositoryInitializationRemovesMalformedRows);
         Add("SQLite repository reads legacy duplicate paths and Unix dates", RepositoryReadsLegacyRows);
         Add("SQLite repository recovers and preserves a corrupt database", RepositoryRecoversCorruptDatabase);
         AddAsync("SQLite repository serializes concurrent writes", RepositorySerializesConcurrentWrites);
@@ -560,10 +599,31 @@ internal static class Program
             string logScript = ReadResource("AutoOrganize.Web.autoorganizelog.js");
             Contains("btnRetryLog", logScript);
             Contains("btnRefreshLog", ReadResource("AutoOrganize.Web.autoorganizelog.html"));
+            Contains("btnApproveAll", ReadResource("AutoOrganize.Web.autoorganizelog.html"));
+            Contains("btnApproveResult", logScript);
+            Contains("btnRejectResult", logScript);
+            Contains("rejectOrganizationResult", logScript);
             Contains("formatFileSize", logScript);
             Contains("updateLogSummary", logScript);
+            Contains("item.Type !== 'Log'", logScript);
+            Contains("Matched: ", logScript);
+            Contains("getMatchedMetadataText", logScript);
+            Contains("window.confirm('Clear every activity entry?", logScript);
+            Contains("ApiClient.clearOrganizationLog", logScript);
+            Contains("const requestQuery = { ...query }", logScript);
+            Contains("generation !== reloadGeneration", logScript);
+            False(logScript.Contains("spinnerReloads", StringComparison.Ordinal));
             Contains("btnRetrySmart", ReadResource("AutoOrganize.Web.autoorganizesmart.html"));
             Contains("btnRetrySmart", ReadResource("AutoOrganize.Web.autoorganizesmart.js"));
+            foreach (string page in new[] { "tv", "movie" })
+            {
+                string script = ReadResource($"AutoOrganize.Web.autoorganize{page}.js");
+                string html = ReadResource($"AutoOrganize.Web.autoorganize{page}.html");
+                Contains("parseWatchLocations", script);
+                Contains("watchLocations.join('\\n')", script);
+                Contains("One folder per line", html);
+                False(script.Contains("existingWatchLocations.slice(1)", StringComparison.Ordinal));
+            }
         });
         Add("dashboard scripts do not modify the shared API client prototype", () =>
         {
@@ -600,6 +660,11 @@ internal static class Program
         repository.Initialize();
         True(File.Exists(database));
         Equal(0, repository.GetResults(new FileOrganizationResultQuery()).TotalRecordCount);
+        using var connection = new SqliteConnection($"Data Source={database}");
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "PRAGMA user_version;";
+        Equal(2L, Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture));
     }
 
     private static void RepositoryRoundTripsFileResults()
@@ -740,6 +805,41 @@ internal static class Program
         Equal(result.Id, page.Items[0].Id);
         Equal("The Show Updated", page.Items[0].DisplayName);
         SequenceEqual(new[] { "The.Show", "The_Show" }, page.Items[0].MatchStrings);
+
+        result.MatchStrings.Remove("The.Show");
+        repository.SaveResult(result, CancellationToken.None);
+        SequenceEqual(
+            new[] { "The_Show" },
+            repository.GetSmartMatch(new FileOrganizationResultQuery()).Items[0].MatchStrings);
+    }
+
+    private static void SmartMatchSavesMergeLogicalDuplicates()
+    {
+        using var temporary = new TemporaryDirectory();
+        using var repository = CreateRepository(Path.Combine(temporary.Path, "repository.db"));
+        repository.Initialize();
+        var first = new SmartMatchResult
+        {
+            ItemName = "The Show",
+            DisplayName = "The Show",
+            OrganizerType = FileOrganizerType.Episode
+        };
+        first.MatchStrings.Add("One.Show");
+        repository.SaveResult(first, CancellationToken.None);
+        var second = new SmartMatchResult
+        {
+            ItemName = "the show",
+            DisplayName = "The Show Updated",
+            OrganizerType = FileOrganizerType.Episode
+        };
+        second.MatchStrings.Add("Two.Show");
+        repository.SaveResult(second, CancellationToken.None);
+
+        var page = repository.GetSmartMatch(new FileOrganizationResultQuery());
+        Equal(1, page.TotalRecordCount);
+        Equal(first.Id, second.Id);
+        Equal("The Show Updated", page.Items[0].DisplayName);
+        SequenceEqual(new[] { "One.Show", "Two.Show" }, page.Items[0].MatchStrings);
     }
 
     private static async Task SmartMatchDeletionIsCaseInsensitive()
@@ -766,6 +866,82 @@ internal static class Program
         repository.SaveResult(result, CancellationToken.None);
         await repository.DeleteSmartMatch(result.Id.ToString("N"), "The.Show", CancellationToken.None).ConfigureAwait(false);
         Equal(0, repository.GetSmartMatch(new FileOrganizationResultQuery()).TotalRecordCount);
+    }
+
+    private static async Task SmartMatchBatchValidationIsAtomic()
+    {
+        using var temporary = new TemporaryDirectory();
+        using var repository = CreateRepository(Path.Combine(temporary.Path, "repository.db"));
+        repository.Initialize();
+        var result = new SmartMatchResult { ItemName = "Show", OrganizerType = FileOrganizerType.Episode };
+        result.MatchStrings.AddRange(new[] { "One.Show", "Two.Show" });
+        repository.SaveResult(result, CancellationToken.None);
+        await ThrowsAsync<ArgumentException>(() => repository.DeleteSmartMatchEntries(
+            new[]
+            {
+                new NameValuePair { Name = result.Id.ToString("N"), Value = "One.Show" },
+                new NameValuePair { Name = "invalid", Value = "Two.Show" }
+            },
+            CancellationToken.None)).ConfigureAwait(false);
+        SequenceEqual(
+            new[] { "One.Show", "Two.Show" },
+            repository.GetSmartMatch(new FileOrganizationResultQuery()).Items[0].MatchStrings);
+    }
+
+    private static async Task SmartMatchAdditionsMergeConcurrently()
+    {
+        using var temporary = new TemporaryDirectory();
+        using var repository = CreateRepository(Path.Combine(temporary.Path, "repository.db"));
+        repository.Initialize();
+        await Task.WhenAll(
+            repository.AddSmartMatchString("Show", "Show", FileOrganizerType.Episode, "One.Show", CancellationToken.None),
+            repository.AddSmartMatchString("show", "Show", FileOrganizerType.Episode, "Two.Show", CancellationToken.None)).ConfigureAwait(false);
+        var page = repository.GetSmartMatch(new FileOrganizationResultQuery());
+        Equal(1, page.TotalRecordCount);
+        SequenceEqual(new[] { "One.Show", "Two.Show" }, page.Items[0].MatchStrings.OrderBy(value => value, StringComparer.Ordinal));
+    }
+
+    private static void SmartMatchInitializationMergesDuplicates()
+    {
+        using var temporary = new TemporaryDirectory();
+        string database = Path.Combine(temporary.Path, "repository.db");
+        using (var connection = new SqliteConnection($"Data Source={database}"))
+        {
+            connection.Open();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE SmartMatch (Id BLOB PRIMARY KEY, ItemName TEXT NOT NULL, DisplayName TEXT, OrganizerType TEXT NOT NULL, MatchStrings TEXT NULL);"
+                + "INSERT INTO SmartMatch VALUES ($FirstId, 'Show', 'Show', 'Episode', '[\"One.Show\"]');"
+                + "INSERT INTO SmartMatch VALUES ($SecondId, 'show', 'Show', 'Episode', '[\"Two.Show\"]');";
+            command.Parameters.AddWithValue("$FirstId", Guid.NewGuid().ToByteArray());
+            command.Parameters.AddWithValue("$SecondId", Guid.NewGuid().ToByteArray());
+            command.ExecuteNonQuery();
+        }
+        using var repository = CreateRepository(database);
+        repository.Initialize();
+        var page = repository.GetSmartMatch(new FileOrganizationResultQuery());
+        Equal(1, page.TotalRecordCount);
+        SequenceEqual(new[] { "One.Show", "Two.Show" }, page.Items[0].MatchStrings.OrderBy(value => value, StringComparer.Ordinal));
+    }
+
+    private static void RepositoryInitializationRemovesMalformedRows()
+    {
+        using var temporary = new TemporaryDirectory();
+        string database = Path.Combine(temporary.Path, "repository.db");
+        using (var repository = CreateRepository(database))
+        {
+            repository.Initialize();
+        }
+        using (var connection = new SqliteConnection($"Data Source={database}"))
+        {
+            connection.Open();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "PRAGMA user_version = 1; INSERT INTO FileOrganizerResults (ResultId, OriginalPath, OrganizationDate, Status, OrganizationType) VALUES ($Id, NULL, 'invalid', 'Failure', 'Unknown');";
+            command.Parameters.AddWithValue("$Id", Guid.NewGuid().ToByteArray());
+            command.ExecuteNonQuery();
+        }
+        using var recovered = CreateRepository(database);
+        recovered.Initialize();
+        Equal(0, recovered.GetResults(new FileOrganizationResultQuery()).TotalRecordCount);
     }
 
     private static void RepositoryReadsLegacyRows()
