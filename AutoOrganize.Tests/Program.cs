@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -64,6 +65,47 @@ internal static class Program
 
     private static void RegisterTests()
     {
+        Add("shared Jellyfin references match target ABI", () =>
+        {
+            string repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+            string buildManifest = File.ReadAllText(Path.Combine(repositoryRoot, "build.yaml"));
+            Match targetAbiMatch = Regex.Match(buildManifest, "(?m)^targetAbi:\\s*\"(?<version>[^\"]+)\"\\s*$");
+            True(targetAbiMatch.Success, "The build manifest does not declare targetAbi.");
+
+            Version targetAbi = Version.Parse(targetAbiMatch.Groups["version"].Value);
+            AssemblyName[] sharedReferences = typeof(AutoOrganizePlugin).Assembly.GetReferencedAssemblies()
+                .Where(reference => reference.Name is "MediaBrowser.Common" or "MediaBrowser.Controller" or "MediaBrowser.Model")
+                .ToArray();
+
+            Equal(3, sharedReferences.Length);
+            foreach (AssemblyName reference in sharedReferences)
+            {
+                Equal(targetAbi, reference.Version);
+            }
+        });
+        Add("release build produces installable ZIP", () =>
+        {
+            string configuration = Directory.GetParent(AppContext.BaseDirectory)!.Parent!.Name;
+            if (!string.Equals(configuration, "Release", StringComparison.Ordinal))
+            {
+                throw new SkipTestException("Packaging is only produced by Release builds.");
+            }
+
+            string repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+            string releaseDirectory = Path.Combine(repositoryRoot, "AutoOrganize", "bin", configuration, "net10.0");
+            string archivePath = Directory.GetFiles(releaseDirectory, "AutoOrganize_*.zip").Single();
+            using ZipArchive archive = ZipFile.OpenRead(archivePath);
+            string[] files = archive.Entries
+                .Where(entry => !string.IsNullOrEmpty(entry.Name))
+                .Select(entry => entry.FullName.Replace('\\', '/'))
+                .ToArray();
+
+            True(files.Contains("AutoOrganize.dll", StringComparer.Ordinal), "The package is missing AutoOrganize.dll.");
+            True(files.Contains("Lingua.dll", StringComparer.Ordinal), "The package is missing Lingua.dll.");
+            True(files.Any(path => path.StartsWith("Lingua/LanguageModels/", StringComparison.Ordinal)), "The package is missing Lingua language models.");
+            True(archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name)).All(entry => entry.Length > 0), "The package contains an empty file.");
+        });
+
         Add("remote search keeps exact title first", () =>
         {
             IReadOnlyList<string> candidates = NameUtils.GetRemoteSearchCandidates("The.Last_Of-Us");
@@ -980,12 +1022,7 @@ internal static class Program
         Add("SQLite repository recovers and preserves a corrupt database", RepositoryRecoversCorruptDatabase);
         AddAsync("SQLite repository serializes concurrent writes", RepositorySerializesConcurrentWrites);
 
-        Add("assembly version is 13.1.0.0", () =>
-        {
-            Assembly assembly = typeof(EpisodeNameFormatter).Assembly;
-            Equal(new Version(13, 1, 0, 0), assembly.GetName().Version);
-        });
-        Add("all plugin types load against the Jellyfin 10.11 runtime surface", () =>
+        Add("all plugin types load against the Jellyfin 12 runtime surface", () =>
         {
             Assembly assembly = typeof(EpisodeNameFormatter).Assembly;
             try
@@ -1012,7 +1049,7 @@ internal static class Program
             Contains("- \"Lingua.dll\"", buildManifest);
             Contains("- \"Lingua/LanguageModels\"", buildManifest);
             string readme = ReadRepositoryFile("README.md");
-            Contains("copy the contents of `AutoOrganize/bin/Release/net9.0/`", readme);
+            Contains("extract `AutoOrganize_<version>.zip`", readme);
             Contains("`Lingua.dll`", readme);
             Contains("`Lingua/LanguageModels`", readme);
         });
@@ -1077,13 +1114,14 @@ internal static class Program
                 Contains("button.setAttribute('aria-busy', 'true')", script);
             }
 
-            Contains("btnRetryLog", ReadResource("AutoOrganize.Web.autoorganizelog.html"));
+            string logHtml = ReadResource("AutoOrganize.Web.autoorganizelog.html");
+            Contains("btnRetryLog", logHtml);
             string logScript = ReadResource("AutoOrganize.Web.autoorganizelog.js");
             Contains("btnRetryLog", logScript);
-            Contains("btnRefreshLog", ReadResource("AutoOrganize.Web.autoorganizelog.html"));
-            Contains("aoOrganizeLabel", ReadResource("AutoOrganize.Web.autoorganizelog.html"));
-            Contains("aoCancelTask", ReadResource("AutoOrganize.Web.autoorganizelog.html"));
-            Contains("btnApproveAll", ReadResource("AutoOrganize.Web.autoorganizelog.html"));
+            Contains("btnRefreshLog", logHtml);
+            Contains("aoOrganizeLabel", logHtml);
+            Contains("aoCancelTask", logHtml);
+            Contains("btnApproveAll", logHtml);
             Contains("btnApproveResult", logScript);
             Contains("btnRejectResult", logScript);
             Contains("material-icons check\" aria-hidden=\"true", logScript);
@@ -1119,10 +1157,15 @@ internal static class Program
             Contains("Cancel", logScript);
             Contains("button.disabled = false;", logScript);
             Contains("function setServerEvents(enabled)", logScript);
+            Contains("AutoOrganize/Status", logScript);
+            Contains("status?.PluginVersion", logScript);
+            Contains("class=\"aoMuted aoPluginVersion\"", logHtml);
             Contains("Events.on(ServerNotifications, event, onServerEvent);", logScript);
             Contains("Events.off(ServerNotifications, event, onServerEvent);", logScript);
             False(logScript.Contains("const method = enabled ? Events.on : Events.off;", StringComparison.Ordinal));
-            Contains("setServerEvents(false);\n        setServerEvents(true);", logScript);
+            True(
+                Regex.IsMatch(logScript, @"setServerEvents\(false\);\s*setServerEvents\(true\);"),
+                "The dashboard does not reset its server event subscriptions.");
             Contains("scheduleOrganizeTaskRefresh", logScript);
             Contains("organizeTaskRefreshRetries", logScript);
             Contains("running ? 1500 : 1000", logScript);

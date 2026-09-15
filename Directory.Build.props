@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <BuildTimestampVersion>$([System.DateTime]::Now.ToString('yyyy.M.d.HHmm'))</BuildTimestampVersion>
+    <Version Condition="'$(Version)' == ''">$(BuildTimestampVersion)</Version>
+    <AssemblyVersion>$(Version)</AssemblyVersion>
+    <FileVersion>$(Version)</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+</Project>

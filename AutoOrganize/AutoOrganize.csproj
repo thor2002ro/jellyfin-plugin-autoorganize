@@ -1,13 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
-    <Version>13.1.0</Version>
-    <AssemblyVersion>13.1.0.0</AssemblyVersion>
-    <FileVersion>13.1.0.0</FileVersion>
-    <InformationalVersion>13.1.0+jellyfin.10.11</InformationalVersion>
+    <TargetFramework>net10.0</TargetFramework>
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <NoWarn>$(NoWarn);1591</NoWarn>
@@ -45,13 +40,32 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Jellyfin.Controller" Version="10.11.11" ExcludeAssets="runtime" />
-    <PackageReference Include="Jellyfin.Database.Implementations" Version="10.11.11" ExcludeAssets="runtime" />
-    <PackageReference Include="Jellyfin.Model" Version="10.11.11" ExcludeAssets="runtime" />
-    <PackageReference Include="Jellyfin.Naming" Version="10.11.11" ExcludeAssets="runtime" />
-    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="9.0.11" ExcludeAssets="runtime" />
+    <PackageReference Include="Jellyfin.Controller" Version="12.0.0" ExcludeAssets="runtime" />
+    <PackageReference Include="Jellyfin.Database.Implementations" Version="12.0.0" ExcludeAssets="runtime" />
+    <PackageReference Include="Jellyfin.Model" Version="12.0.0" ExcludeAssets="runtime" />
+    <PackageReference Include="Jellyfin.Naming" Version="12.0.0" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.12" ExcludeAssets="runtime" />
     <PackageReference Include="SearchPioneer.Lingua" Version="1.0.5" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
+
+  <Target Name="CreateReleasePackage" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <PropertyGroup>
+      <PluginPackageDirectory>$(IntermediateOutputPath)plugin-package</PluginPackageDirectory>
+      <PluginPackagePath>$(TargetDir)AutoOrganize_$(Version).zip</PluginPackagePath>
+    </PropertyGroup>
+    <ItemGroup>
+      <ExistingPluginPackages Include="$(TargetDir)AutoOrganize_*.zip" />
+      <PluginLanguageModels Include="$(TargetDir)Lingua\LanguageModels\**\*" />
+    </ItemGroup>
+    <RemoveDir Directories="$(PluginPackageDirectory)" />
+    <Delete Files="@(ExistingPluginPackages)" />
+    <MakeDir Directories="$(PluginPackageDirectory)" />
+    <Copy SourceFiles="$(TargetPath);$(TargetDir)Lingua.dll" DestinationFolder="$(PluginPackageDirectory)" />
+    <Copy
+      SourceFiles="@(PluginLanguageModels)"
+      DestinationFiles="@(PluginLanguageModels->'$(PluginPackageDirectory)\Lingua\LanguageModels\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <ZipDirectory SourceDirectory="$(PluginPackageDirectory)" DestinationFile="$(PluginPackagePath)" Overwrite="true" />
+  </Target>
 
 </Project>
