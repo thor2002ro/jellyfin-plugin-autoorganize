@@ -100,6 +100,16 @@ async function getAutoOrganizeTask() {
     }) || null;
 }
 
+async function loadPluginVersion(page) {
+    const versionElement = page.querySelector('.aoPluginVersion');
+    try {
+        const status = await ApiClient.getJSON(ApiClient.getUrl('AutoOrganize/Status'));
+        versionElement.textContent = 'Version ' + (status?.PluginVersion || 'unknown');
+    } catch {
+        versionElement.textContent = 'Version unknown';
+    }
+}
+
 async function refreshOrganizeTaskState(page) {
     if (!page) {
         return false;
@@ -910,6 +920,7 @@ export default function (view) {
     view.addEventListener('viewshow', function () {
         pageGlobal = view;
         LibraryMenu.setTabs('autoorganize', 0, getTabs);
+        loadPluginVersion(view);
         reloadItems(view);
 
         setServerEvents(false);

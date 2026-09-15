@@ -1,10 +1,10 @@
-# Auto Organize for Jellyfin 10.11
+# Auto Organize for Jellyfin 12
 
-Community maintenance fork of the archived Auto Organize plugin. This fork targets Jellyfin **10.11.11**, **.NET 9**, and is not an official Jellyfin release.
+Community maintenance fork of the archived Auto Organize plugin. This fork targets Jellyfin **12.0.0**, **.NET 10**, and is not an official Jellyfin release.
 
 ## What this fork adds
 
-- Jellyfin 10.11 plugin/runtime port with Jellyfin-native dependency injection, hosted startup migration, elevated API endpoints, and embedded dashboard pages.
+- Jellyfin 12 plugin/runtime port with Jellyfin-native dependency injection, hosted startup migration, elevated API endpoints, and embedded dashboard pages.
 - TV episode and movie organization from configurable watch folders.
 - Approval-first workflow: detected items can be approved, rejected, corrected manually, retried, refreshed, approved in bulk, or deleted from the activity log.
 - TV season bundle detection for whole season folders, including multi-season bundles for the same show.
@@ -34,7 +34,7 @@ TV defaults also enable season folders and use `Season %s`. Movie defaults creat
 
 ## TV organization
 
-TV files are parsed with Jellyfin's 10.11 naming library. The organizer can match existing series and episodes, auto-detect series through configured metadata providers, or create pending library items for approval.
+TV files are parsed with Jellyfin's 12.0 naming library. The organizer can match existing series and episodes, auto-detect series through configured metadata providers, or create pending library items for approval.
 
 Useful TV options:
 
@@ -137,13 +137,13 @@ Back up your Jellyfin configuration and media library before first use. Test wit
 
 ## Build
 
-Install the .NET 9 SDK, then run:
+Install the .NET 10 SDK, then run:
 
 ```bash
-dotnet build AutoOrganize.sln -c Release
+dotnet build AutoOrganize.sln --configuration Release
 ```
 
-The plugin files are generated under `AutoOrganize/bin/Release/net9.0/`.
+The plugin files and installable `AutoOrganize_<version>.zip` archive are generated under `AutoOrganize/bin/Release/net10.0/`.
 
 Run the regression suite with:
 
@@ -153,7 +153,15 @@ dotnet run --project AutoOrganize.Tests/AutoOrganize.Tests.csproj -c Release
 
 ## Installation
 
-Create an Auto Organize plugin directory under Jellyfin's plugin data directory, copy the contents of `AutoOrganize/bin/Release/net9.0/` into it, and restart Jellyfin.
+Add this URL as a plugin repository in the Jellyfin dashboard:
+
+```text
+https://raw.githubusercontent.com/thor2002ro/jellyfin-plugin-autoorganize/manifest/manifest.json
+```
+
+The `manifest` branch is generated from published GitHub releases. Only releases with a valid `AutoOrganize_<version>.zip` asset are listed, and the branch is maintained as one amended `Local: Update plugin repository manifest` commit.
+
+For a manual install, extract `AutoOrganize_<version>.zip` into an Auto Organize plugin directory under Jellyfin's plugin data directory and restart Jellyfin.
 
 The package artifacts are:
 
@@ -164,6 +172,8 @@ Lingua/LanguageModels
 ```
 
 `Lingua.dll` and `Lingua/LanguageModels` are required for subtitle language detection.
+
+GitHub releases are built and packaged with [Jellyfin Plugin Repository Manager](https://github.com/oddstr13/jellyfin-plugin-repository-manager) using the included `build.yaml`.
 
 ## License
 

@@ -2,19 +2,22 @@
 name: "Auto Organize"
 guid: "70b7b43b-471b-4159-b4be-56750c795499"
 imageUrl: "https://repo.jellyfin.org/releases/plugin/images/jellyfin-plugin-autoorganize.png"
-version: "13.1.0.0"
-targetAbi: "10.11.0.0"
-framework: "net9.0"
+version: "2026.9.15.2201"
+targetAbi: "12.0.0.0"
+framework: "net10.0"
 owner: "community-maintained"
 overview: "Automatically organize new media"
-description: "Automatically organize TV episodes and movies for Jellyfin 10.11"
+description: "Automatically organize TV episodes and movies for Jellyfin 12"
 category: "General"
 artifacts:
   - "AutoOrganize.dll"
   - "Lingua.dll"
   - "Lingua/LanguageModels"
 changelog: |2-
-  ### Jellyfin 10.11 and Emby parity update
+  ### Jellyfin 12 release
+  - Target Jellyfin Server 12, plugin ABI 12.0.0.0, and .NET 10.
+  - Add installable ZIP packaging and plugin repository manifest automation.
+  - Retain the Jellyfin 10.11 organizer, safety, approval, subtitle, and naming improvements.
   - Add explicit preserve-original-filename options for TV episodes and movies.
   - Add an option to always create season folders, including for existing flat series layouts.
   - Retry remote searches with normalized release-title separators.
