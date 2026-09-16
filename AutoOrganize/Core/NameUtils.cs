@@ -137,7 +137,7 @@ public static class NameUtils
         return string.Equals(name1, name2, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string GetComparableName(string name)
+    internal static string GetComparableName(string name)
     {
         name = RemoveDiacritics(name);
         name = " " + name + " ";

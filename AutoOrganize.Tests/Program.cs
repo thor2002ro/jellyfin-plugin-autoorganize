@@ -549,7 +549,6 @@ internal static class Program
             Contains("RemoveFromInprogressList(fileOrganizationResult)", source);
             Contains("OrganizeTvSeasonDirectory(fileOrganizationResult.OriginalPath, autoOrganizeOptions.TvOptions, approvedBundleItems", source);
             Contains("OrganizeDetectedFileToStoredTarget", source);
-            Contains("SafeFileTransfer.TransferAsync(result.OriginalPath, result.TargetPath!", source);
             Contains("ShouldCleanApprovedSource(fileOrganizationResult2, autoOrganizeOptions)", source);
             Contains("CleanApprovedSource(fileOrganizationResult2.OriginalPath, fileOrganizationResult2.Type, autoOrganizeOptions, cancellationToken)", source);
             Contains("ShouldCleanApprovedSource(result, options)", source);
@@ -835,6 +834,98 @@ internal static class Program
             True(File.Exists(ignored));
             Equal("subtitle", await File.ReadAllTextAsync(Path.Combine(temporary.Path, "target", "Avatar (2009)", "Avatar (2009).eng.srt")).ConfigureAwait(false));
             False(File.Exists(Path.Combine(temporary.Path, "target", "Avatar (2009)", "Avatar (2009).en.forced.srt")));
+        });
+        AddAsync("safe move carries movie subtitle with a shorter release name", async () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string source = Path.Combine(temporary.Path, "Avatar.2009.2160p.WEB-DL.mkv");
+            string subtitle = Path.Combine(temporary.Path, "Avatar.2009.en.srt");
+            string unrelatedSubtitle = Path.Combine(temporary.Path, "Avatar.2022.en.srt");
+            string target = Path.Combine(temporary.Path, "target", "Avatar (2009)", "Avatar (2009).mkv");
+            await File.WriteAllBytesAsync(source, CreateContent(1024)).ConfigureAwait(false);
+            await File.WriteAllTextAsync(subtitle, "movie subtitle").ConfigureAwait(false);
+            await File.WriteAllTextAsync(unrelatedSubtitle, "unrelated movie subtitle").ConfigureAwait(false);
+            SubtitleAssociationMap associations = SubtitleAssociationMap.Create(new[] { source }, new[] { subtitle, unrelatedSubtitle }, new NamingOptions());
+            await SafeFileTransfer.TransferAsync(source, target, copySource: false, overwrite: false, CancellationToken.None, associatedSubtitlePaths: associations.GetSubtitlePaths(source)).ConfigureAwait(false);
+            False(File.Exists(subtitle));
+            True(File.Exists(unrelatedSubtitle));
+            Equal("movie subtitle", await File.ReadAllTextAsync(Path.Combine(temporary.Path, "target", "Avatar (2009)", "Avatar (2009).eng.srt")).ConfigureAwait(false));
+        });
+        AddAsync("semantic subtitle matching ignores title casing", async () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string source = Path.Combine(temporary.Path, "Avatar.2009.2160p.WEB-DL.mkv");
+            string subtitle = Path.Combine(temporary.Path, "avatar.2009.en.srt");
+            string target = Path.Combine(temporary.Path, "target", "Avatar (2009)", "Avatar (2009).mkv");
+            await File.WriteAllBytesAsync(source, CreateContent(1024)).ConfigureAwait(false);
+            await File.WriteAllTextAsync(subtitle, "movie subtitle").ConfigureAwait(false);
+
+            await SafeFileTransfer.TransferAsync(source, target, copySource: false, overwrite: false, CancellationToken.None).ConfigureAwait(false);
+
+            False(File.Exists(subtitle));
+            Equal("movie subtitle", await File.ReadAllTextAsync(Path.Combine(temporary.Path, "target", "Avatar (2009)", "Avatar (2009).eng.srt")).ConfigureAwait(false));
+        });
+        AddAsync("duplicate scan paths do not make a subtitle ambiguous", async () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string source = Path.Combine(temporary.Path, "Avatar.2009.2160p.WEB-DL.mkv");
+            string subtitle = Path.Combine(temporary.Path, "Avatar.2009.en.srt");
+            string target = Path.Combine(temporary.Path, "target", "Avatar (2009)", "Avatar (2009).mkv");
+            await File.WriteAllBytesAsync(source, CreateContent(1024)).ConfigureAwait(false);
+            await File.WriteAllTextAsync(subtitle, "movie subtitle").ConfigureAwait(false);
+            SubtitleAssociationMap associations = SubtitleAssociationMap.Create(new[] { source, source }, new[] { subtitle, subtitle }, new NamingOptions());
+
+            await SafeFileTransfer.TransferAsync(source, target, copySource: false, overwrite: false, CancellationToken.None, associatedSubtitlePaths: associations.GetSubtitlePaths(source)).ConfigureAwait(false);
+
+            False(File.Exists(subtitle));
+        });
+        AddAsync("safe move carries episode subtitle with a shorter release name", async () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string source = Path.Combine(temporary.Path, "The.Show.S01E01.1080p.WEB-DL.mkv");
+            string subtitle = Path.Combine(temporary.Path, "The.Show.S01E01.en.srt");
+            string unrelatedSubtitle = Path.Combine(temporary.Path, "The.Show.S01E02.en.srt");
+            string target = Path.Combine(temporary.Path, "target", "The Show", "Season 01", "The Show S01E01.mkv");
+            await File.WriteAllBytesAsync(source, CreateContent(1024)).ConfigureAwait(false);
+            await File.WriteAllTextAsync(subtitle, "episode subtitle").ConfigureAwait(false);
+            await File.WriteAllTextAsync(unrelatedSubtitle, "unrelated episode subtitle").ConfigureAwait(false);
+            SubtitleAssociationMap associations = SubtitleAssociationMap.Create(new[] { source }, new[] { subtitle, unrelatedSubtitle }, new NamingOptions());
+            await SafeFileTransfer.TransferAsync(source, target, copySource: false, overwrite: false, CancellationToken.None, associatedSubtitlePaths: associations.GetSubtitlePaths(source)).ConfigureAwait(false);
+            False(File.Exists(subtitle));
+            True(File.Exists(unrelatedSubtitle));
+            Equal("episode subtitle", await File.ReadAllTextAsync(Path.Combine(temporary.Path, "target", "The Show", "Season 01", "The Show S01E01.eng.srt")).ConfigureAwait(false));
+        });
+        AddAsync("ambiguous movie subtitle stays in the watch folder", async () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string firstVideo = Path.Combine(temporary.Path, "Avatar.2009.1080p.WEB-DL.mkv");
+            string secondVideo = Path.Combine(temporary.Path, "Avatar.2009.2160p.WEB-DL.mkv");
+            string subtitle = Path.Combine(temporary.Path, "Avatar.2009.en.srt");
+            await File.WriteAllBytesAsync(firstVideo, CreateContent(1024)).ConfigureAwait(false);
+            await File.WriteAllBytesAsync(secondVideo, CreateContent(1024)).ConfigureAwait(false);
+            await File.WriteAllTextAsync(subtitle, "ambiguous movie subtitle").ConfigureAwait(false);
+            SubtitleAssociationMap associations = SubtitleAssociationMap.Create(new[] { firstVideo, secondVideo }, new[] { subtitle }, new NamingOptions());
+
+            await SafeFileTransfer.TransferAsync(firstVideo, Path.Combine(temporary.Path, "target", "1080p", "Avatar.mkv"), copySource: false, overwrite: false, CancellationToken.None, associatedSubtitlePaths: associations.GetSubtitlePaths(firstVideo)).ConfigureAwait(false);
+            await SafeFileTransfer.TransferAsync(secondVideo, Path.Combine(temporary.Path, "target", "2160p", "Avatar.mkv"), copySource: false, overwrite: false, CancellationToken.None, associatedSubtitlePaths: associations.GetSubtitlePaths(secondVideo)).ConfigureAwait(false);
+
+            True(File.Exists(subtitle));
+        });
+        AddAsync("ambiguous episode subtitle stays in the watch folder", async () =>
+        {
+            using var temporary = new TemporaryDirectory();
+            string firstVideo = Path.Combine(temporary.Path, "The.Show.S01E01.1080p.WEB-DL.mkv");
+            string secondVideo = Path.Combine(temporary.Path, "The.Show.S01E01.2160p.WEB-DL.mkv");
+            string subtitle = Path.Combine(temporary.Path, "The.Show.S01E01.en.srt");
+            await File.WriteAllBytesAsync(firstVideo, CreateContent(1024)).ConfigureAwait(false);
+            await File.WriteAllBytesAsync(secondVideo, CreateContent(1024)).ConfigureAwait(false);
+            await File.WriteAllTextAsync(subtitle, "ambiguous episode subtitle").ConfigureAwait(false);
+            SubtitleAssociationMap associations = SubtitleAssociationMap.Create(new[] { firstVideo, secondVideo }, new[] { subtitle }, new NamingOptions());
+
+            await SafeFileTransfer.TransferAsync(firstVideo, Path.Combine(temporary.Path, "target", "1080p", "The Show S01E01.mkv"), copySource: false, overwrite: false, CancellationToken.None, associatedSubtitlePaths: associations.GetSubtitlePaths(firstVideo)).ConfigureAwait(false);
+            await SafeFileTransfer.TransferAsync(secondVideo, Path.Combine(temporary.Path, "target", "2160p", "The Show S01E01.mkv"), copySource: false, overwrite: false, CancellationToken.None, associatedSubtitlePaths: associations.GetSubtitlePaths(secondVideo)).ConfigureAwait(false);
+
+            True(File.Exists(subtitle));
         });
         AddAsync("exact subtitle sidecars do not treat title tokens as language", async () =>
         {
