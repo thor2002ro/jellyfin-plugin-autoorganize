@@ -101,8 +101,8 @@ class ManifestGeneratorTests(unittest.TestCase):
             "https://example.test/AutoOrganize_2.0.0.0.zip": second_zip,
         }
         tagged_metadata = {
-            "v1": 'version: 1\ntargetAbi: "10.11.0.0"\n',
-            "v2": 'version: "2.0.0.0"\ntargetAbi: "12.0.0.0"\n',
+            "v1": 'version: "99.0.0.0"\ntargetAbi: "10.11.0.0"\n',
+            "v2": 'version: "99.0.0.0"\ntargetAbi: "12.0.0.0"\n',
         }
 
         manifest = generator.build_manifest(
@@ -121,6 +121,20 @@ class ManifestGeneratorTests(unittest.TestCase):
         self.assertEqual("12.0.0.0", manifest[0]["versions"][0]["targetAbi"])
         self.assertEqual("Second release", manifest[0]["versions"][0]["changelog"])
         self.assertEqual(hashlib.md5(first_zip).hexdigest(), manifest[0]["versions"][1]["checksum"])
+
+    def test_rejects_zip_version_that_does_not_match_release_tag(self):
+        generator = load_generator()
+        release = self.release("https://example.test/plugin.zip")
+        release["tag_name"] = "v2.0.0.0"
+
+        with self.assertRaisesRegex(ValueError, "does not match release tag"):
+            generator.build_manifest(
+                "owner/plugin",
+                root_metadata(),
+                [release],
+                lambda _: plugin_zip(),
+                lambda _: 'targetAbi: "12.0.0.0"\n',
+            )
 
     def test_rejects_zip_without_language_models(self):
         generator = load_generator()

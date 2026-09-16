@@ -173,7 +173,7 @@ Lingua/LanguageModels
 
 `Lingua.dll` and `Lingua/LanguageModels` are required for subtitle language detection.
 
-GitHub releases are built and packaged with [Jellyfin Plugin Repository Manager](https://github.com/oddstr13/jellyfin-plugin-repository-manager) using the included `build.yaml`.
+GitHub releases use the prebuilt ZIP uploaded to the release. Manifest automation validates the package, reads its version from the archive name, and reads the target ABI from the tagged `build.yaml` without rebuilding the plugin.
 
 ## License
 
