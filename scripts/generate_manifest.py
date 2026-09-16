@@ -13,8 +13,11 @@ import zipfile
 
 
 PLUGIN_METADATA_KEYS = ("guid", "name", "description", "overview", "owner", "category")
-VERSION_METADATA_KEYS = ("version", "targetAbi")
-PLUGIN_ARCHIVE_PATTERN = re.compile(r"^AutoOrganize_.+\.zip$", re.IGNORECASE)
+VERSION_METADATA_KEYS = ("targetAbi",)
+PLUGIN_ARCHIVE_PATTERN = re.compile(
+    r"^AutoOrganize_(?P<version>\d+(?:\.\d+){0,3})\.zip$",
+    re.IGNORECASE,
+)
 
 
 def parse_metadata(text, required_keys):
@@ -96,19 +99,27 @@ def build_manifest(repository, root_metadata_text, releases, fetch_bytes, fetch_
         if release.get("draft"):
             continue
 
-        assets = [
-            asset
-            for asset in release.get("assets", [])
-            if PLUGIN_ARCHIVE_PATTERN.fullmatch(asset.get("name", ""))
-        ]
+        assets = []
+        for asset in release.get("assets", []):
+            match = PLUGIN_ARCHIVE_PATTERN.fullmatch(asset.get("name", ""))
+            if match:
+                assets.append((asset, normalize_version(match.group("version"))))
         if not assets:
             continue
         if len(assets) != 1:
             raise ValueError(f"{release['tag_name']} has multiple plugin ZIP assets")
 
-        asset = assets[0]
+        asset, version = assets[0]
+        tag_version = release["tag_name"]
+        if tag_version[:1].lower() == "v":
+            tag_version = tag_version[1:]
+        normalized_tag_version = normalize_version(tag_version)
+        if version != normalized_tag_version:
+            raise ValueError(
+                f"{asset['name']} version {version} does not match release tag {release['tag_name']}"
+            )
+
         tagged_metadata = parse_metadata(fetch_tag_metadata(release["tag_name"]), VERSION_METADATA_KEYS)
-        version = normalize_version(tagged_metadata["version"])
 
         contents = fetch_bytes(asset["browser_download_url"])
         validate_archive(contents, asset["name"])
