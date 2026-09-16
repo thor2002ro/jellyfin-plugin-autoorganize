@@ -1,0 +1,28 @@
+[
+  {
+    "name": "Auto Organize",
+    "guid": "70b7b43b-471b-4159-b4be-56750c795499",
+    "owner": "community-maintained",
+    "overview": "Automatically organize new media",
+    "description": "Automatically organize TV episodes and movies for Jellyfin 12",
+    "category": "General",
+    "versions": [
+      {
+        "version": "2026.9.25.2203",
+        "changelog": "fix buttons",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/thor2002ro/jellyfin-plugin-autoorganize/releases/download/v2026.9.25.2203/AutoOrganize_2026.9.25.2203.zip",
+        "checksum": "466f6e139168ac5e4c30619a0cef646e",
+        "timestamp": "2026-09-25T19:08:19Z"
+      },
+      {
+        "version": "2026.9.16.0915",
+        "changelog": "- Jellyfin Server 12, plugin ABI 12, and .NET 10 compatibility.\n  - Installable ZIP packaging and plugin-repository manifest support.\n  - Dynamic `yyyy.M.d.HHmm` versions generated from compilation time.\n  - Subtitle sidecars are paired with incoming movies and episodes before Jellyfin scans them.\n  - Matched subtitles move or copy with their media and retain language suffixes.\n  - Ambiguous matches and destination conflicts remain untouched to prevent incorrect organization.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/thor2002ro/jellyfin-plugin-autoorganize/releases/download/v2026.9.16.0915/AutoOrganize_2026.9.16.0915.zip",
+        "checksum": "bf1be313f759b6c06355abf091ae440b",
+        "timestamp": "2026-09-16T05:40:49Z"
+      }
+    ]
+  }
+]
