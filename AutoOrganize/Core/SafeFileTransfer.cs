@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using AutoOrganize.Model;
 using Emby.Naming.Common;
 using Lingua;
 
@@ -62,9 +63,9 @@ internal static class SafeFileTransfer
 			Path.GetFileNameWithoutExtension(targetMediaPath) + GetSubtitleSuffix(sourceSubtitlePath, sourceMediaPath) + Path.GetExtension(sourceSubtitlePath));
 	}
 
-	public static async Task TransferAsync(string sourcePath, string targetPath, bool copySource, bool overwrite, CancellationToken cancellationToken)
+	public static async Task TransferAsync(string sourcePath, string targetPath, bool copySource, bool overwrite, CancellationToken cancellationToken, NamingOptions? namingOptions = null, IReadOnlyList<string>? associatedSubtitlePaths = null)
 	{
-		List<(string Source, string Target)> subtitleSidecars = GetSubtitleSidecars(sourcePath, targetPath);
+		List<(string Source, string Target)> subtitleSidecars = GetSubtitleSidecars(sourcePath, targetPath, namingOptions ?? DefaultNamingOptions, associatedSubtitlePaths);
 		EnsureCanTransferSidecars(subtitleSidecars, overwrite);
 		await TransferFileAsync(sourcePath, targetPath, copySource, overwrite, cancellationToken).ConfigureAwait(false);
 		foreach ((string source, string target) in subtitleSidecars)
@@ -80,6 +81,39 @@ internal static class SafeFileTransfer
 	public static Task TransferSingleAsync(string sourcePath, string targetPath, bool copySource, bool overwrite, CancellationToken cancellationToken)
 	{
 		return TransferFileAsync(sourcePath, targetPath, copySource, overwrite, cancellationToken);
+	}
+
+	internal static IReadOnlyList<string> GetAssociatedSubtitlePaths(string sourceVideoPath, NamingOptions namingOptions)
+	{
+		string? sourceDirectory = Path.GetDirectoryName(sourceVideoPath);
+		if (string.IsNullOrWhiteSpace(sourceDirectory) || !Directory.Exists(sourceDirectory))
+		{
+			return Array.Empty<string>();
+		}
+
+		string[] directoryFiles = Directory.EnumerateFiles(sourceDirectory).ToArray();
+		return SubtitleAssociationMap.Create(
+			directoryFiles.Where(path => IsLikelyVideoFile(path, namingOptions)),
+			directoryFiles.Where(IsSubtitleFile),
+			namingOptions).GetSubtitlePaths(sourceVideoPath);
+	}
+
+	internal static IReadOnlyList<FileOrganizationBundleItem> GetSubtitleBundleItems(FileOrganizationResult result, int? seasonNumber = null)
+	{
+		if (string.IsNullOrWhiteSpace(result.TargetPath))
+		{
+			return result.BundleItems;
+		}
+
+		return result.BundleItems
+			.Where(item => !string.IsNullOrWhiteSpace(item.SourcePath))
+			.Select(item => new FileOrganizationBundleItem
+			{
+				SourcePath = item.SourcePath,
+				TargetPath = GetSubtitleTargetPath(item.SourcePath, result.TargetPath, result.OriginalPath),
+				SeasonNumber = seasonNumber
+			})
+			.ToList();
 	}
 
 	private static async Task TransferFileAsync(string sourcePath, string targetPath, bool copySource, bool overwrite, CancellationToken cancellationToken)
@@ -121,7 +155,7 @@ internal static class SafeFileTransfer
 		}
 	}
 
-	private static List<(string Source, string Target)> GetSubtitleSidecars(string sourcePath, string targetPath)
+	private static List<(string Source, string Target)> GetSubtitleSidecars(string sourcePath, string targetPath, NamingOptions namingOptions, IReadOnlyList<string>? associatedSubtitlePaths)
 	{
 		string? sourceDirectory = Path.GetDirectoryName(sourcePath);
 		string? targetDirectory = Path.GetDirectoryName(targetPath);
@@ -130,11 +164,21 @@ internal static class SafeFileTransfer
 			return new List<(string Source, string Target)>();
 		}
 
-		string sourceName = Path.GetFileNameWithoutExtension(sourcePath);
+		string[] directoryFiles = Directory.EnumerateFiles(sourceDirectory).ToArray();
+		IReadOnlyList<string> selectedSubtitles = associatedSubtitlePaths
+			?? SubtitleAssociationMap.Create(
+				directoryFiles.Where(path => IsLikelyVideoFile(path, namingOptions)),
+				directoryFiles.Where(IsSubtitleFile),
+				namingOptions).GetSubtitlePaths(sourcePath);
+		IEnumerable<string> strictSidecars = directoryFiles
+			.Where(IsSubtitleFile)
+			.Where(sidecar => IsSidecarFor(sidecar, Path.GetFileNameWithoutExtension(sourcePath)));
 		var sidecars = new List<(string Source, string Target)>();
-		foreach (string sidecar in Directory.EnumerateFiles(sourceDirectory))
+		foreach (string sidecar in selectedSubtitles.Concat(strictSidecars).Distinct(PathSafety.PathComparer))
 		{
-			if (!IsSubtitleFile(sidecar) || !IsSidecarFor(sidecar, sourceName))
+			if (!IsSubtitleFile(sidecar)
+				|| !PathSafety.AreSame(sourceDirectory, Path.GetDirectoryName(sidecar) ?? string.Empty)
+				|| !File.Exists(sidecar))
 			{
 				continue;
 			}

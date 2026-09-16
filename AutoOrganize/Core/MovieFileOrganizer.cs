@@ -56,10 +56,15 @@ public class MovieFileOrganizer
 
 	public Task<FileOrganizationResult> OrganizeMovieFile(string path, MovieFileOrganizationOptions options, bool overwriteExisting, CancellationToken cancellationToken)
 	{
-		return OrganizeMovieFile(path, options, overwriteExisting, requireApproval: false, cancellationToken);
+		return OrganizeMovieFile(path, options, overwriteExisting, requireApproval: false, SafeFileTransfer.GetAssociatedSubtitlePaths(path, _namingOptions), cancellationToken);
 	}
 
 	public async Task<FileOrganizationResult> OrganizeMovieFile(string path, MovieFileOrganizationOptions options, bool overwriteExisting, bool requireApproval, CancellationToken cancellationToken)
+	{
+		return await OrganizeMovieFile(path, options, overwriteExisting, requireApproval, SafeFileTransfer.GetAssociatedSubtitlePaths(path, _namingOptions), cancellationToken).ConfigureAwait(false);
+	}
+
+	internal async Task<FileOrganizationResult> OrganizeMovieFile(string path, MovieFileOrganizationOptions options, bool overwriteExisting, bool requireApproval, IReadOnlyList<string> associatedSubtitlePaths, CancellationToken cancellationToken)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(path, "path");
 		ArgumentNullException.ThrowIfNull(options, "options");
@@ -71,7 +76,8 @@ public class MovieFileOrganizer
 			OriginalPath = path,
 			OriginalFileName = Path.GetFileName(path),
 			Type = FileOrganizerType.Unknown,
-			FileSize = _fileSystem.GetFileInfo(path).Length
+			FileSize = _fileSystem.GetFileInfo(path).Length,
+			BundleItems = associatedSubtitlePaths.Select(subtitlePath => new FileOrganizationBundleItem { SourcePath = subtitlePath }).ToList()
 		};
 		try
 		{
@@ -123,7 +129,8 @@ public class MovieFileOrganizer
 			&& existing.StatusMessage == current.StatusMessage
 			&& existing.TargetPath == current.TargetPath
 			&& existing.ExtractedName == current.ExtractedName
-			&& existing.ExtractedYear == current.ExtractedYear;
+			&& existing.ExtractedYear == current.ExtractedYear
+			&& existing.BundleItems.Select(item => (item.SourcePath, item.TargetPath)).SequenceEqual(current.BundleItems.Select(item => (item.SourcePath, item.TargetPath)));
 	}
 
 	private Movie CreateNewMovie(MovieFileOrganizationRequest request, FileOrganizationResult result, MovieFileOrganizationOptions options)
@@ -255,6 +262,7 @@ public class MovieFileOrganizer
 			}
 			_logger.LogInformation("Sorting file {SourcePath} to new path {NewPath}", sourcePath, path);
 			result.TargetPath = path;
+			result.BundleItems = SafeFileTransfer.GetSubtitleBundleItems(result);
 			PathSafety.EnsureWithinLibraryRoots(result.TargetPath, GetLibraryRoots());
 			bool flag2 = File.Exists(result.TargetPath);
 			if (!overwriteExisting)
@@ -326,7 +334,14 @@ public class MovieFileOrganizer
 		_libraryMonitor.ReportFileSystemChangeBeginning(targetPath);
 		try
 		{
-			await SafeFileTransfer.TransferAsync(result.OriginalPath, targetPath, options.CopyOriginalFile, overwriteExisting, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+			await SafeFileTransfer.TransferAsync(
+				result.OriginalPath,
+				targetPath,
+				options.CopyOriginalFile,
+				overwriteExisting,
+				cancellationToken,
+				_namingOptions,
+				result.BundleItems.Select(item => item.SourcePath).ToList()).ConfigureAwait(continueOnCapturedContext: false);
 			result.Status = FileSortingStatus.Success;
 			result.StatusMessage = string.Empty;
 		}

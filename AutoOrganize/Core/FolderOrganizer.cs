@@ -50,9 +50,9 @@ public sealed class FolderOrganizer
 			options.DeleteEmptyFolders,
 			options.ExtendedClean,
 			options.LeftOverFileExtensionsToDelete,
-			(path, token) => SafeFileTransfer.IsSubtitleFile(path)
+			(path, associatedSubtitlePaths, token) => SafeFileTransfer.IsSubtitleFile(path)
 				? subtitleOrganizer.OrganizeEpisodeSubtitleFile(path, options, token)
-				: organizer.OrganizeEpisodeFile(path, options, options.RequireApproval, token),
+				: organizer.OrganizeEpisodeFile(path, options, options.RequireApproval, associatedSubtitlePaths, token),
 			options.RequireApproval
 				? (directory, files, token) => organizer.DetectSeasonDirectory(directory, files, options, token)
 				: null,
@@ -72,9 +72,9 @@ public sealed class FolderOrganizer
 			options.DeleteEmptyFolders,
 			options.ExtendedClean,
 			options.LeftOverFileExtensionsToDelete,
-			(path, token) => SafeFileTransfer.IsSubtitleFile(path)
+			(path, associatedSubtitlePaths, token) => SafeFileTransfer.IsSubtitleFile(path)
 				? subtitleOrganizer.OrganizeMovieSubtitleFile(path, options, token)
-				: organizer.OrganizeMovieFile(path, options, options.OverwriteExistingFiles, options.RequireApproval, token),
+				: organizer.OrganizeMovieFile(path, options, options.OverwriteExistingFiles, options.RequireApproval, associatedSubtitlePaths, token),
 			null,
 			progress,
 			cancellationToken);
@@ -101,13 +101,17 @@ public sealed class FolderOrganizer
 			return await OrganizeApprovedBundle(path, approvedBundleItems, options, cancellationToken).ConfigureAwait(false);
 		}
 		List<FileSystemMetadata> foundFiles = GetFilesToOrganize(path, recursive: false);
-		var videoBaseNames = new HashSet<string>(
+		List<string> videoPaths =
 			foundFiles
 				.Where(IsVideoFile)
-				.Select(file => Path.Combine(Path.GetDirectoryName(file.FullName) ?? string.Empty, Path.GetFileNameWithoutExtension(file.FullName))),
-			PathSafety.PathComparer);
+				.Select(file => file.FullName)
+				.ToList();
+		SubtitleAssociationMap subtitleAssociations = SubtitleAssociationMap.Create(
+			videoPaths,
+			foundFiles.Where(file => SafeFileTransfer.IsSubtitleFile(file.FullName)).Select(file => file.FullName),
+			_namingOptions);
 		List<FileSystemMetadata> eligibleFiles = foundFiles
-			.Where(file => CanOrganize(file, minimumFileSize, videoBaseNames))
+			.Where(file => CanOrganize(file, minimumFileSize, subtitleAssociations))
 			.OrderBy(file => file.FullName, PathSafety.PathComparer)
 			.ToList();
 		var result = new FileOrganizationResult
@@ -125,7 +129,7 @@ public sealed class FolderOrganizer
 		{
 			FileOrganizationResult item = SafeFileTransfer.IsSubtitleFile(file.FullName)
 				? await subtitleOrganizer.ApproveEpisodeSubtitleFile(file.FullName, options, cancellationToken).ConfigureAwait(false)
-				: await organizer.OrganizeEpisodeFile(file.FullName, options, requireApproval: false, cancellationToken).ConfigureAwait(false);
+				: await organizer.OrganizeEpisodeFile(file.FullName, options, requireApproval: false, subtitleAssociations.GetSubtitlePaths(file.FullName), cancellationToken).ConfigureAwait(false);
 			result.TargetPath ??= string.IsNullOrWhiteSpace(item.TargetPath) ? null : Path.GetDirectoryName(item.TargetPath);
 			result.ExtractedName ??= item.ExtractedName;
 			result.ExtractedYear ??= item.ExtractedYear;
@@ -158,7 +162,7 @@ public sealed class FolderOrganizer
 		bool deleteEmptyFolders,
 		bool extendedClean,
 		IEnumerable<string>? configuredDeleteExtensions,
-		Func<string, CancellationToken, Task<FileOrganizationResult>> organizeFile,
+		Func<string, IReadOnlyList<string>, CancellationToken, Task<FileOrganizationResult>> organizeFile,
 		Func<string, IReadOnlyList<FileSystemMetadata>, CancellationToken, Task<FileOrganizationResult?>>? detectDirectory,
 		IProgress<double> progress,
 		CancellationToken cancellationToken)
@@ -196,13 +200,17 @@ public sealed class FolderOrganizer
 			AddPluginLogLine($"{mediaType} watch folder skipped: {skippedLocation}");
 		}
 		List<FileSystemMetadata> foundFiles = watchLocations.SelectMany(GetFilesToOrganize).ToList();
-		var videoBaseNames = new HashSet<string>(
+		List<string> videoPaths =
 			foundFiles
 				.Where(IsVideoFile)
-				.Select(file => Path.Combine(Path.GetDirectoryName(file.FullName) ?? string.Empty, Path.GetFileNameWithoutExtension(file.FullName))),
-			PathSafety.PathComparer);
+				.Select(file => file.FullName)
+				.ToList();
+		SubtitleAssociationMap subtitleAssociations = SubtitleAssociationMap.Create(
+			videoPaths,
+			foundFiles.Where(file => SafeFileTransfer.IsSubtitleFile(file.FullName)).Select(file => file.FullName),
+			_namingOptions);
 		List<FileSystemMetadata> eligibleFiles = (from file in foundFiles.OrderBy(_fileSystem.GetCreationTimeUtc)
-			where CanOrganize(file, minimumFileSize, videoBaseNames)
+			where CanOrganize(file, minimumFileSize, subtitleAssociations)
 			select file).ToList();
 		AddPluginLogLine($"{mediaType} scan found {foundFiles.Count} file(s), {eligibleFiles.Count} eligible media/subtitle file(s).");
 		int succeeded = 0;
@@ -253,7 +261,7 @@ public sealed class FolderOrganizer
 			cancellationToken.ThrowIfCancellationRequested();
 			try
 			{
-				FileOrganizationResult result = await organizeFile(file.FullName, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+				FileOrganizationResult result = await organizeFile(file.FullName, subtitleAssociations.GetSubtitlePaths(file.FullName), cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
 				string? directory = Path.GetDirectoryName(file.FullName);
 				if (result.Status == FileSortingStatus.Success && !string.IsNullOrEmpty(directory))
 				{
@@ -310,11 +318,11 @@ public sealed class FolderOrganizer
 			.ToList();
 	}
 
-	private bool CanOrganize(FileSystemMetadata file, long minimumFileSize, HashSet<string> videoBaseNames)
+	private bool CanOrganize(FileSystemMetadata file, long minimumFileSize, SubtitleAssociationMap subtitleAssociations)
 	{
 		try
 		{
-			return (SafeFileTransfer.IsSubtitleFile(file.FullName) && !HasMatchingVideoSidecar(file.FullName, videoBaseNames))
+			return (SafeFileTransfer.IsSubtitleFile(file.FullName) && !subtitleAssociations.IsAssociatedSubtitle(file.FullName))
 				|| (IsVideoFile(file) && file.Length >= minimumFileSize);
 		}
 		catch (Exception exception)
@@ -339,28 +347,6 @@ public sealed class FolderOrganizer
 			_logger.LogError(exception, "Error checking media file {FileName}", file.Name);
 			return false;
 		}
-	}
-
-	private static bool HasMatchingVideoSidecar(string subtitlePath, HashSet<string> videoBaseNames)
-	{
-		string subtitleName = Path.GetFileNameWithoutExtension(subtitlePath);
-		while (!string.IsNullOrWhiteSpace(subtitleName))
-		{
-			if (videoBaseNames.Contains(Path.Combine(Path.GetDirectoryName(subtitlePath) ?? string.Empty, subtitleName)))
-			{
-				return true;
-			}
-
-			int separator = subtitleName.LastIndexOf('.');
-			if (separator < 0)
-			{
-				return false;
-			}
-
-			subtitleName = subtitleName.Substring(0, separator);
-		}
-
-		return false;
 	}
 
 	private string? GetWatchLocationError(string path, string mediaType, IReadOnlyList<string> libraryFolderPaths)

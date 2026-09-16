@@ -307,7 +307,14 @@ public class FileOrganizationService : IFileOrganizationService
 				}
 				else
 				{
-					await SafeFileTransfer.TransferAsync(result.OriginalPath, result.TargetPath!, copySource, overwrite, cancellationToken).ConfigureAwait(false);
+					await SafeFileTransfer.TransferAsync(
+						result.OriginalPath,
+						result.TargetPath!,
+						copySource,
+						overwrite,
+						cancellationToken,
+						_namingOptions,
+						result.BundleItems.Select(item => item.SourcePath).ToList()).ConfigureAwait(false);
 				}
 			}
 			finally

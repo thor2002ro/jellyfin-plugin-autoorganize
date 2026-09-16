@@ -57,15 +57,20 @@ public class EpisodeFileOrganizer
 
 	public Task<FileOrganizationResult> OrganizeEpisodeFile(string path, TvFileOrganizationOptions options, CancellationToken cancellationToken)
 	{
-		return OrganizeEpisodeFile(path, options, requireApproval: false, cancellationToken);
+		return OrganizeEpisodeFile(path, options, requireApproval: false, SafeFileTransfer.GetAssociatedSubtitlePaths(path, _namingOptions), cancellationToken);
 	}
 
 	public async Task<FileOrganizationResult> OrganizeEpisodeFile(string path, TvFileOrganizationOptions options, bool requireApproval, CancellationToken cancellationToken)
 	{
-		return await OrganizeEpisodeFile(path, options, requireApproval, saveResult: true, cancellationToken).ConfigureAwait(false);
+		return await OrganizeEpisodeFile(path, options, requireApproval, SafeFileTransfer.GetAssociatedSubtitlePaths(path, _namingOptions), cancellationToken).ConfigureAwait(false);
 	}
 
-	private async Task<FileOrganizationResult> OrganizeEpisodeFile(string path, TvFileOrganizationOptions options, bool requireApproval, bool saveResult, CancellationToken cancellationToken)
+	internal Task<FileOrganizationResult> OrganizeEpisodeFile(string path, TvFileOrganizationOptions options, bool requireApproval, IReadOnlyList<string> associatedSubtitlePaths, CancellationToken cancellationToken)
+	{
+		return OrganizeEpisodeFile(path, options, requireApproval, saveResult: true, associatedSubtitlePaths, cancellationToken);
+	}
+
+	private async Task<FileOrganizationResult> OrganizeEpisodeFile(string path, TvFileOrganizationOptions options, bool requireApproval, bool saveResult, IReadOnlyList<string> associatedSubtitlePaths, CancellationToken cancellationToken)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(path, "path");
 		ArgumentNullException.ThrowIfNull(options, "options");
@@ -77,7 +82,8 @@ public class EpisodeFileOrganizer
 			OriginalPath = path,
 			OriginalFileName = Path.GetFileName(path),
 			Type = FileOrganizerType.Unknown,
-			FileSize = _fileSystem.GetFileInfo(path).Length
+			FileSize = _fileSystem.GetFileInfo(path).Length,
+			BundleItems = associatedSubtitlePaths.Select(subtitlePath => new FileOrganizationBundleItem { SourcePath = subtitlePath }).ToList()
 		};
 		try
 		{
@@ -170,7 +176,8 @@ public class EpisodeFileOrganizer
 			&& existing.StatusMessage == current.StatusMessage
 			&& existing.TargetPath == current.TargetPath
 			&& existing.ExtractedName == current.ExtractedName
-			&& existing.ExtractedYear == current.ExtractedYear;
+			&& existing.ExtractedYear == current.ExtractedYear
+			&& existing.BundleItems.Select(item => (item.SourcePath, item.TargetPath)).SequenceEqual(current.BundleItems.Select(item => (item.SourcePath, item.TargetPath)));
 	}
 
 	public async Task<FileOrganizationResult?> DetectSeasonDirectory(string path, IReadOnlyList<FileSystemMetadata> files, TvFileOrganizationOptions options, CancellationToken cancellationToken)
@@ -539,6 +546,7 @@ public class EpisodeFileOrganizer
 			}
 			_logger.LogInformation("Sorting file {SourcePath} to new path {NewPath}", sourcePath, path);
 			result.TargetPath = path;
+			result.BundleItems = SafeFileTransfer.GetSubtitleBundleItems(result, episode.ParentIndexNumber);
 			PathSafety.EnsureWithinLibraryRoots(result.TargetPath, GetLibraryRoots());
 			bool flag2 = File.Exists(result.TargetPath);
 			List<string> otherDuplicatePaths = GetOtherDuplicatePaths(result.TargetPath, series, episode);
@@ -729,7 +737,14 @@ public class EpisodeFileOrganizer
 		_libraryMonitor.ReportFileSystemChangeBeginning(targetPath);
 		try
 		{
-			await SafeFileTransfer.TransferAsync(result.OriginalPath, targetPath, options.CopyOriginalFile, options.OverwriteExistingEpisodes, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+			await SafeFileTransfer.TransferAsync(
+				result.OriginalPath,
+				targetPath,
+				options.CopyOriginalFile,
+				options.OverwriteExistingEpisodes,
+				cancellationToken,
+				_namingOptions,
+				result.BundleItems.Select(item => item.SourcePath).ToList()).ConfigureAwait(continueOnCapturedContext: false);
 			result.Status = FileSortingStatus.Success;
 			result.StatusMessage = string.Empty;
 		}
@@ -1066,6 +1081,10 @@ public class EpisodeFileOrganizer
 		var addedSourcePaths = new HashSet<string>(PathSafety.PathComparer);
 		var resolver = new EpisodeResolver(_namingOptions);
 		List<FileSystemMetadata> sortedFiles = files.OrderBy(file => file.FullName, PathSafety.PathComparer).ToList();
+		SubtitleAssociationMap subtitleAssociations = SubtitleAssociationMap.Create(
+			sortedFiles.Where(file => SafeFileTransfer.IsLikelyVideoFile(file.FullName, _namingOptions)).Select(file => file.FullName),
+			sortedFiles.Where(file => SafeFileTransfer.IsSubtitleFile(file.FullName)).Select(file => file.FullName),
+			_namingOptions);
 		foreach (FileSystemMetadata file in sortedFiles)
 		{
 			if (!SafeFileTransfer.IsLikelyVideoFile(file.FullName, _namingOptions) || !VideoResolver.IsVideoFile(file.FullName, _namingOptions) || file.Length < (long)options.MinFileSizeMb * 1024 * 1024)
@@ -1085,7 +1104,7 @@ public class EpisodeFileOrganizer
 				SeasonNumber = episodeInfo.SeasonNumber
 			});
 			addedSourcePaths.Add(file.FullName);
-			AddSubtitleBundleItems(file.FullName, targetPath, episodeInfo.SeasonNumber, sortedFiles, items, addedSourcePaths);
+			AddSubtitleBundleItems(file.FullName, targetPath, episodeInfo.SeasonNumber, subtitleAssociations, items, addedSourcePaths);
 		}
 		return items;
 	}
@@ -1117,19 +1136,18 @@ public class EpisodeFileOrganizer
 		return Path.Combine(GetSeasonTargetPath(series, episodeInfo.SeasonNumber.Value, options), _fileSystem.GetValidFilename(filename).Trim());
 	}
 
-	private static void AddSubtitleBundleItems(string sourceVideoPath, string targetVideoPath, int? seasonNumber, IEnumerable<FileSystemMetadata> sortedFiles, List<FileOrganizationBundleItem> items, HashSet<string> addedSourcePaths)
+	private static void AddSubtitleBundleItems(string sourceVideoPath, string targetVideoPath, int? seasonNumber, SubtitleAssociationMap subtitleAssociations, List<FileOrganizationBundleItem> items, HashSet<string> addedSourcePaths)
 	{
-		string sourceName = Path.GetFileNameWithoutExtension(sourceVideoPath);
-		foreach (FileSystemMetadata file in sortedFiles)
+		foreach (string subtitlePath in subtitleAssociations.GetSubtitlePaths(sourceVideoPath))
 		{
-			if (!SafeFileTransfer.IsSubtitleFile(file.FullName) || !SafeFileTransfer.IsSidecarFor(file.FullName, sourceName) || !addedSourcePaths.Add(file.FullName))
+			if (!addedSourcePaths.Add(subtitlePath))
 			{
 				continue;
 			}
 			items.Add(new FileOrganizationBundleItem
 			{
-				SourcePath = file.FullName,
-				TargetPath = SafeFileTransfer.GetSubtitleTargetPath(file.FullName, targetVideoPath, sourceVideoPath),
+				SourcePath = subtitlePath,
+				TargetPath = SafeFileTransfer.GetSubtitleTargetPath(subtitlePath, targetVideoPath, sourceVideoPath),
 				SeasonNumber = seasonNumber
 			});
 		}
