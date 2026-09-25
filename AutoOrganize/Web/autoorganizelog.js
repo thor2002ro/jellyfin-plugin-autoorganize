@@ -110,6 +110,23 @@ async function loadPluginVersion(page) {
     }
 }
 
+function setOrganizeTaskAvailability(page, task) {
+    const available = Boolean(task?.Id);
+    const panel = page?.querySelector('.organizeTaskPanel');
+    const button = page?.querySelector('.btnOrganize');
+    panel?.classList.toggle('hide', !available);
+
+    if (!button) {
+        return;
+    }
+
+    if (available) {
+        button.dataset.taskid = task.Id;
+    } else {
+        button.removeAttribute('data-taskid');
+    }
+}
+
 async function refreshOrganizeTaskState(page) {
     if (!page) {
         return false;
@@ -117,6 +134,7 @@ async function refreshOrganizeTaskState(page) {
 
     try {
         const task = await getAutoOrganizeTask();
+        setOrganizeTaskAvailability(page, task);
         organizeTaskId = task?.Id || null;
         const running = isTaskRunning(task);
         const wasRunning = organizeTaskRunning;

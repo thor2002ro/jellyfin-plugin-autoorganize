@@ -1303,6 +1303,18 @@ internal static class Program
                 False(script.Contains("existingWatchLocations.slice(1)", StringComparison.Ordinal));
             }
         });
+        Add("activity controls recover from the scheduled task REST result", () =>
+        {
+            string logScript = ReadResource("AutoOrganize.Web.autoorganizelog.js");
+            Contains("function setOrganizeTaskAvailability(page, task)", logScript);
+            Contains("const available = Boolean(task?.Id);", logScript);
+            Contains("panel?.classList.toggle('hide', !available);", logScript);
+            Contains("button.dataset.taskid = task.Id;", logScript);
+            Contains("button.removeAttribute('data-taskid');", logScript);
+            True(
+                Regex.IsMatch(logScript, @"const task = await getAutoOrganizeTask\(\);[\s\S]*?setOrganizeTaskAvailability\(page, task\);"),
+                "The REST task result does not restore the activity controls.");
+        });
         Add("dashboard scripts do not modify the shared API client prototype", () =>
         {
             Assembly assembly = typeof(EpisodeNameFormatter).Assembly;
